@@ -1,0 +1,133 @@
+# ============================================================================
+# vehicle_sim — configuration
+# All units SI. Section references point to the "Controle 2" document.
+# Keys are read as section.key. Comments: '#' or ';'.
+# ============================================================================
+
+[simulation]
+vehicle         = both      # ice | ev | both (both = two independent runs side by side)
+duration        = 60.0      # s
+Ts_ctrl         = 0.02      # s   upper controller period (§12.2)
+dt_ice          = 0.0005    # s   ICE integration step (§5)
+dt_ev           = 0.0002    # s   EV integration step (§5)
+integrator      = rk4       # rk4 | euler
+realtime_factor = 1.0       # 1 = wall clock, 2 = 2x faster, 0 = as fast as possible
+on_finish       = exit      # exit | wait (wait = stay alive for a restart from the viewer)
+
+[output]
+file            = sim_output.txt
+period          = 0.02      # s   one line every period (simulated time)
+flush_each_line = true      # needed for live reading by the 3D viewer
+
+[environment]
+rho  = 1.225                # kg/m3
+g    = 9.81                 # m/s2
+beta = 0.0                  # rad  road grade (>0 = uphill), disturbance
+
+# ---------------------------------------------------------------- §1 body
+[body]
+m   = 1940                  # kg
+r_w = 0.3                   # m
+A_d = 2.4                   # m2
+Cx  = 0.5                   # -
+Cr  = 0.0155                # -
+
+# ---------------------------------------------------------------- §2 brakes
+[brakes]
+th_b   = 0.070              # s  pure delay
+tau_b  = 0.080              # s  first-order time constant
+mu_max = 0.8                # -  F_b,max = mu_max*m*g
+
+# ---------------------------------------------------------------- limits
+[limits]
+P_max   = 120000            # W  traction and regen (shaft)
+a_min_g = -0.5              # g
+a_max_g = 0.25              # g
+
+# ---------------------------------------------------------------- §3 ICE
+[ice]
+p_atm         = 101325      # Pa
+T_atm         = 288.15      # K
+R_air         = 287         # J/(kg.K)
+gamma         = 1.4
+D_th          = 0.050       # m   throttle diameter
+Cd_th         = 0.8         # -   discharge coefficient
+Vm_factor     = 1.5         # -   V_m = Vm_factor*V_d
+T_m           = 288.15      # K
+V_d           = 2.5e-3      # m3
+eta_v         = 0.85
+BMEP_max      = 10e5        # Pa
+T0            = 15          # N.m
+cw            = 0.048       # N.m.s/rad
+omega_ref_rpm = 3000
+rpm_min       = 1000
+rpm_max       = 6500
+th_e          = 0.060       # s   torque delay
+i_gear        = 4.1         # total ratio
+eta_t         = 0.92
+I_engine      = 0.20        # kg.m2 (engine + gearbox, engine shaft)
+I_wheels      = 4.0         # kg.m2 (4 wheels)
+
+# ---------------------------------------------------------------- §4 EV
+[ev]
+V_bat  = 400                # V
+R_a    = 0.05               # ohm
+L_a    = 1.0e-3             # H
+k_e    = 0.25               # V.s/rad
+k_t    = 0.25               # N.m/A
+J_m    = 0.2                # kg.m2 (motor shaft)
+i_gear = 10
+eta_t  = 0.95
+i_max  = 400                # A
+w_ci   = 600                # rad/s current-loop bandwidth
+
+# ---------------------------------------------------------------- §12.2 upper controller
+[controller]
+k_p          = 0.75         # 1/s
+k_i          = 0.1875       # 1/s2
+h            = 1.8          # s   time headway
+lambda       = 0.4          # 1/s
+d0           = 5.0          # m   standstill distance
+d_det        = 150.0        # m   radar range
+
+# ---------------------------------------------------------------- §12.7 leader
+[leader]
+L_veh = 4.5                 # m
+
+# ---------------------------------------------------------------- §12.8 scenario
+# preset = T0 | S1 | S2 | S3 | S4 | S5 | S6 | custom
+# A preset overrides the generic fields below; 'custom' uses them as written.
+[scenario]
+preset             = S3
+v0                 = 30.0   # m/s   initial ego speed (trim)
+v_set              = 30.0   # m/s   driver set speed
+v_set_step_time    = -1     # s     <0 = no step
+v_set_step_value   = 30.0   # m/s
+leader_present     = true
+v_lead0            = 30.0   # m/s
+d_init             = -1     # m     <0 = auto: d0 + h*v0
+lead_accel         = -1.0   # m/s2
+lead_accel_start   = 10.0   # s
+lead_v_target      = 20.0   # m/s   leader holds this speed once reached
+target_appear_time = -1     # s     S6 cut-in, <0 = disabled
+cutin_distance     = 20.0   # m
+target_lost_time   = -1     # s     S4, <0 = disabled
+
+# ---------------------------------------------------------------- live control
+# Read at start and re-read while running (checked every 0.1 s). A key takes
+# effect when its text changes. Commented keys are optional; delete a key or
+# set it to 'scenario' to give control back to the [scenario] section.
+# Physics constants above are only re-read on a restart.
+[runtime]
+pause           = false
+stop            = false     # set to true while running to end the process
+restart_id      = 0         # change the number to restart with the whole file re-read
+# realtime_factor = 1.0     # 0 = as fast as possible
+# v_set         = 30        # driver set speed override [m/s] (or: scenario)
+# leader_accel  = 0.0       # leader acceleration override [m/s2] (or: scenario)
+# h             = 1.8       # controller gains, applied live
+# lambda        = 0.4
+# d0            = 5.0
+# k_p           = 0.75
+# k_i           = 0.1875
+# beta          = 0.0       # road grade [rad], disturbance

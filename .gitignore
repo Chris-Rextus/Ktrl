@@ -1,1 +1,3 @@
 cpp/build/
+sim_output*.txt
+*.tmp
