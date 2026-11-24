@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ktrl - ACC simulator</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Ktrl</h1>
+  <nav>
+    <button class="tab active" data-tab="live">Live</button>
+    <button class="tab" data-tab="params">Parameters</button>
+    <button class="tab" data-tab="jobs">Tests &amp; batch</button>
+  </nav>
+  <div id="conn" class="pill">connecting</div>
+  <div id="state" class="pill">-</div>
+</header>
+
+<!-- ============================================================ LIVE -->
+<section id="tab-live" class="tab-page active">
+  <div class="live-grid">
+    <div class="views">
+      <canvas id="road" height="185"></canvas>
+      <div class="charts">
+        <div class="chart"><div class="chart-title">Speed [m/s]</div><canvas id="ch-speed" height="170"></canvas></div>
+        <div class="chart"><div class="chart-title">Distance to leader d and target d_ref [m]</div><canvas id="ch-dist" height="170"></canvas></div>
+        <div class="chart"><div class="chart-title">Acceleration a and a_des [m/s²]</div><canvas id="ch-acc" height="170"></canvas></div>
+      </div>
+      <div class="legend">
+        <span><i style="background:var(--ice)"></i>ICE</span>
+        <span><i style="background:var(--ev)"></i>EV</span>
+        <span><i style="background:var(--lead)"></i>leader / target</span>
+        <span><i class="dashed"></i>commanded (a_des, d_ref)</span>
+      </div>
+    </div>
+
+    <aside class="controls">
+      <div class="group">
+        <h2>Run</h2>
+        <div class="buttons">
+          <button id="btn-start" class="primary">Start</button>
+          <button id="btn-stop">Stop</button>
+          <button id="btn-restart">Restart</button>
+          <button id="btn-pause">Pause</button>
+        </div>
+        <label class="field">Scenario
+          <select id="sel-preset"></select>
+        </label>
+        <div id="preset-desc" class="hint"></div>
+        <label class="check"><input type="checkbox" id="chk-endless"> Endless (run until Stop)</label>
+        <label class="field">Playback speed
+          <select id="sel-speed">
+            <option value="0.25">0.25×</option><option value="0.5">0.5×</option>
+            <option value="1" selected>1× (real time)</option><option value="2">2×</option>
+            <option value="4">4×</option><option value="8">8×</option>
+          </select>
+        </label>
+        <div class="hint">Scenario and Endless take effect when you press Start or Restart.</div>
+      </div>
+
+      <div class="group">
+        <h2>Distance to the car ahead</h2>
+        <div class="seg" id="seg-spacing">
+          <button data-value="fixed">Fixed distance</button>
+          <button data-value="time_gap">Time gap</button>
+        </div>
+        <div id="box-fixed">
+          <div class="slider" data-key="d_set" data-min="5" data-max="120" data-step="1" data-unit="m"
+               data-label="Desired distance"></div>
+        </div>
+        <div id="box-gap">
+          <div class="slider" data-key="h" data-min="0.5" data-max="3" data-step="0.1" data-unit="s"
+               data-label="Time gap h"></div>
+          <div class="slider" data-key="d0" data-min="0" data-max="20" data-step="0.5" data-unit="m"
+               data-label="Standstill distance d0"></div>
+          <div class="hint" id="gap-hint"></div>
+        </div>
+        <div class="slider" data-key="lambda" data-min="0.1" data-max="1.5" data-step="0.05" data-unit="1/s"
+             data-label="Distance gain λ"></div>
+      </div>
+
+      <div class="group">
+        <h2>Speed</h2>
+        <div class="slider" data-key="v_set" data-min="0" data-max="45" data-step="0.5" data-unit="m/s"
+             data-label="Set speed" data-scenario="1"></div>
+        <div class="slider" data-key="k_p" data-min="0.1" data-max="2" data-step="0.05" data-unit="1/s"
+             data-label="Speed gain k_p"></div>
+        <div class="slider" data-key="k_i" data-min="0" data-max="1" data-step="0.0125" data-unit="1/s²"
+             data-label="Speed gain k_i"></div>
+      </div>
+
+      <div class="group">
+        <h2>Leader and road</h2>
+        <div class="slider" data-key="leader_accel" data-min="-5" data-max="2" data-step="0.1" data-unit="m/s²"
+             data-label="Leader acceleration" data-scenario="1"></div>
+        <div class="slider" data-key="grade" data-min="-10" data-max="10" data-step="0.5" data-unit="%"
+             data-label="Road grade"></div>
+        <button id="btn-reset-live" class="small">Hand everything back to the scenario</button>
+      </div>
+    </aside>
+  </div>
+  <pre id="console" class="console"></pre>
+</section>
+
+<!-- ============================================================ PARAMETERS -->
+<section id="tab-params" class="tab-page">
+  <div class="params-bar">
+    <span id="params-path" class="hint"></span>
+    <span id="params-dirty" class="hint"></span>
+    <button id="btn-discard">Discard changes</button>
+    <button id="btn-validate">Check</button>
+    <button id="btn-save">Save</button>
+    <button id="btn-save-restart" class="primary">Save &amp; restart</button>
+  </div>
+  <pre id="params-result" class="result hidden"></pre>
+  <div id="params-form" class="params-form"></div>
+</section>
+
+<!-- ============================================================ JOBS -->
+<section id="tab-jobs" class="tab-page">
+  <div class="group">
+    <h2>Validation tests</h2>
+    <button id="btn-tests" class="primary">Run all tests</button>
+    <span class="hint">Compares the model with the numbers of the document (takes ~1 s).</span>
+  </div>
+  <div class="group">
+    <h2>Batch (all scenarios at full speed)</h2>
+    <div id="batch-presets" class="buttons"></div>
+    <button id="btn-batch" class="primary">Run batch</button>
+  </div>
+  <pre id="job-output" class="result">Results appear here.</pre>
+</section>
+
+<div id="toast"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,5 +1,6 @@
 #include "params.hpp"
 #include "config.hpp"
+#include "presets.hpp"
 
 #include <iomanip>
 #include <ostream>
@@ -37,6 +38,7 @@ Params Params::from_config(const Config& c) {
     p.sim.integrator      = c.get_string("simulation.integrator");
     p.sim.realtime_factor = c.get_double("simulation.realtime_factor");
     p.sim.on_finish       = c.get_string("simulation.on_finish", "exit");
+    p.sim.endless         = c.get_bool("simulation.endless", false);
 
     p.out.file            = c.get_string("output.file");
     p.out.period          = c.get_double("output.period");
@@ -105,6 +107,11 @@ Params Params::from_config(const Config& c) {
     p.ctrl.lambda       = c.get_double("controller.lambda");
     p.ctrl.d0           = c.get_double("controller.d0");
     p.ctrl.d_det        = c.get_double("controller.d_det");
+    const std::string spacing = c.get_string("controller.spacing", "time_gap");
+    require(spacing == "time_gap" || spacing == "fixed",
+            "controller.spacing must be time_gap | fixed");
+    p.ctrl.fixed_spacing = spacing == "fixed";
+    p.ctrl.d_set        = c.get_double("controller.d_set", 30.0);
 
     p.lead.L_veh = c.get_double("leader.L_veh");
 
@@ -124,6 +131,11 @@ Params Params::from_config(const Config& c) {
     s.target_appear_time = c.get_double("scenario.target_appear_time");
     s.cutin_distance     = c.get_double("scenario.cutin_distance");
     s.target_lost_time   = c.get_double("scenario.target_lost_time");
+
+    // presets (§12.8) overwrite the generic fields and the duration
+    require(apply_preset(s.preset, s, p.sim.duration),
+            "scenario.preset must be custom | T0 | S1 | S2 | S3 | S4 | S5 | S6");
+    if (p.sim.endless) p.sim.duration = 0.0;            // run until stopped
 
     // ================= validation =================
     require(p.sim.vehicle == "ice" || p.sim.vehicle == "ev" || p.sim.vehicle == "both",
@@ -145,6 +157,7 @@ Params Params::from_config(const Config& c) {
     require(e.rpm_min > 0 && e.rpm_max > e.rpm_min, "0 < ice.rpm_min < ice.rpm_max");
     require(m.L_a > 0 && m.R_a > 0 && m.k_t > 0 && m.k_e > 0, "ev L_a, R_a, k_t, k_e > 0");
     require(p.ctrl.h > 0, "controller.h > 0");
+    require(p.ctrl.d_set > 0, "controller.d_set > 0");
 
     // ================= derived constants =================
     p.body.ca = 0.5 * p.env.rho * p.body.Cx * p.body.A_d;
@@ -217,7 +230,12 @@ void print_params(const Params& p, std::ostream& os) {
        << "== steps\n"
        << "  ctrl: ICE " << d.n_ctrl_ice << ", EV " << d.n_ctrl_ev
        << " | th_e " << d.n_th_e << " | th_b ICE " << d.n_th_b_ice << ", EV " << d.n_th_b_ev << "\n"
-       << "== scenario: preset=" << p.scn.preset << "\n";
+       << "== spacing: ";
+    if (p.ctrl.fixed_spacing) os << "fixed, d_ref = " << p.ctrl.d_set << " m\n";
+    else os << "time gap, d_ref = d0 + h*v = " << p.ctrl.d0 << " + " << p.ctrl.h << "*v\n";
+    os << "== scenario: " << p.scn.preset << " - " << preset_description(p.scn.preset);
+    if (p.sim.endless) os << "  (endless)\n";
+    else os << "  (duration " << p.sim.duration << " s)\n";
 }
 
 // ------------------------------------------------------------------ self-test

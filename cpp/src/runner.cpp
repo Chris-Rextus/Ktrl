@@ -1,5 +1,7 @@
 #include "runner.hpp"
 #include "config.hpp"
+#include "columns.hpp"
+#include "presets.hpp"
 
 #include <atomic>
 #include <cctype>
@@ -18,84 +20,6 @@ std::atomic<bool> g_stop_requested{false};
 
 constexpr double POLL_PERIOD_S   = 0.1;   // config file check (wall clock)
 constexpr double STATUS_PERIOD_S = 0.1;   // status file refresh (wall clock)
-
-// ---------------------------------------------------------------- columns
-// The same function produces the header (names) and the data (values), so
-// they can never get out of sync.
-struct NameSink {
-    std::string line;
-    std::string prefix;
-    void operator()(const char* name, double) {
-        if (!line.empty()) line += ' ';
-        line += prefix;
-        line += name;
-    }
-};
-
-struct ValueSink {
-    std::string line;
-    char buf[64];
-    void operator()(const char*, double v) {
-        // %.9g keeps ~1 mm resolution on positions of several km
-        std::snprintf(buf, sizeof buf, line.empty() ? "%.9g" : " %.9g", v);
-        line += buf;
-    }
-};
-
-template <class Sink, class Car>
-void emit_common(Sink& s, const Lane<Car>& L) {
-    const auto& car = L.car();
-    const auto& o   = L.ctrl().out();
-    const auto& ld  = L.leader();
-    s("x",        car.pos());
-    s("v",        car.v());
-    s("a",        car.out().a);
-    s("a_des",    L.a_des());
-    s("a_cr",     o.a_cr);
-    s("a_sv",     o.a_sv);
-    s("mode",     o.mode);
-    s("I",        o.I);
-    s("v_set",    L.scenario().v_set(L.t()));
-    s("e_v",      o.e_v);
-    s("d",        L.d());
-    s("d_ref",    o.d_ref);
-    s("e_s",      o.e_s);
-    s("target",   L.target());
-    s("lead_on",  L.leader_on_lane());
-    s("lead_x",   ld.x);
-    s("lead_v",   ld.v);
-    s("lead_a",   ld.a);
-    s("F_t",      car.out().F_t);
-    s("F_b",      car.state()[Car::FB]);
-    s("F_b_cmd",  car.out().ll.Fb_cmd);
-    s("sat_hi",   car.out().ll.sat_hi);
-    s("sat_lo",   car.out().ll.sat_lo);
-    s("collided", L.collided());
-}
-
-template <class Sink>
-void emit(Sink& s, const Lane<IceVehicle>& L) {
-    emit_common(s, L);
-    const auto& car = L.car();
-    s("theta_th", car.out().ll.theta_th);
-    s("p_m",      car.state()[IceVehicle::PM]);
-    s("T_e",      car.out().T_e);
-    s("rpm",      car.out().rpm);
-    s("clutch",   car.engaged());
-}
-
-template <class Sink>
-void emit(Sink& s, const Lane<EvVehicle>& L) {
-    emit_common(s, L);
-    const auto& car = L.car();
-    s("i_a",      car.state()[EvVehicle::IA]);
-    s("i_ref",    car.out().ll.i_ref_s);
-    s("D",        car.out().D);
-    s("V_c",      car.out().V_c);
-    s("rpm",      car.out().rpm);
-    s("P_bat",    car.out().P_bat);
-    s("E_bat",    car.state()[EvVehicle::EBAT]);
-}
 
 double secs(std::chrono::steady_clock::duration d) {
     return std::chrono::duration<double>(d).count();
@@ -135,9 +59,10 @@ void Runner::start_run() {
     for (const auto& k : cfg.unused_keys())
         if (k.rfind("runtime.", 0) != 0)
             std::cerr << "warning: unused config key '" << k << "' (typo?)\n";
-    if (p_.scn.preset != "custom")
-        std::cerr << "note: scenario presets arrive in step 7; using the [scenario] fields "
-                     "as written (preset = " << p_.scn.preset << ")\n";
+    std::cerr << "scenario " << p_.scn.preset << ": " << preset_description(p_.scn.preset)
+              << " (";
+    if (p_.sim.endless) std::cerr << "endless)\n";
+    else std::cerr << p_.sim.duration << " s)\n";
 
     ice_.reset();
     ev_.reset();
@@ -159,6 +84,11 @@ void Runner::start_run() {
     stop_ = false;
     restart_ = false;
     rt_factor_ = force_fast_ ? 0.0 : p_.sim.realtime_factor;
+    if (p_.sim.endless && rt_factor_ <= 0.0) {
+        // an endless run as fast as possible would fill the disk
+        std::cerr << "note: endless run - realtime_factor 0 (or --fast) replaced by 1\n";
+        rt_factor_ = 1.0;
+    }
     runtime_seen_.clear();
     apply_runtime(cfg, /*first=*/true);
     cfg_mtime_ = std::filesystem::last_write_time(cfg_path_);
@@ -356,6 +286,7 @@ void Runner::apply_runtime(const Config& c, bool first) {
 
     if (changed("realtime_factor") && !force_fast_) {
         rt_factor_ = std::max(0.0, c.get_double("runtime.realtime_factor"));
+        if (p_.sim.endless && rt_factor_ <= 0.0) rt_factor_ = 1.0;   // see start_run
         rebase_clock();
         note("realtime_factor");
     }
@@ -376,7 +307,7 @@ void Runner::apply_runtime(const Config& c, bool first) {
     }
 
     // controller gains (live)
-    for (const char* k : {"k_p", "k_i", "h", "lambda", "d0"}) {
+    for (const char* k : {"k_p", "k_i", "h", "lambda", "d0", "d_set"}) {
         if (!changed(k)) continue;
         const double val = c.get_double(std::string("runtime.") + k);
         for_lanes([&](auto& L) {
@@ -386,8 +317,18 @@ void Runner::apply_runtime(const Config& c, bool first) {
             else if (std::string(k) == "h")      g.h = std::max(val, 0.05);
             else if (std::string(k) == "lambda") g.lambda = val;
             else if (std::string(k) == "d0")     g.d0 = val;
+            else if (std::string(k) == "d_set")  g.d_set = std::max(val, 0.5);
         });
         note(k);
+    }
+    if (changed("spacing")) {
+        const std::string sp = lower(c.get_string("runtime.spacing"));
+        if (sp == "fixed" || sp == "time_gap") {
+            for_lanes([&](auto& L) { L.ctrl().gains().fixed_spacing = sp == "fixed"; });
+            note("spacing");
+        } else {
+            last_msg_ = "runtime.spacing must be time_gap | fixed";
+        }
     }
 
     // road grade (disturbance): lanes read p_ by reference

@@ -1,0 +1,10 @@
+scn car      d_min    d_end |e_s|max t_settle  jumpC5   a_min   a_max   v_end   Fb_max |i|/lim  E_wh_kWh E_bat_kWh  verdict
+S5  ice       5.42     5.42     0.42      0.0   0.033   -2.94    0.00    0.00     5520       -    0.0334         -  OK (clutch opened)
+S5  ev        5.00     5.00     0.21      0.0   0.033   -2.94    0.00    0.00     2528   1.000    0.0331   -0.0247  OK
+S6  ice      18.65    44.60    30.25     20.6   4.905   -4.89    0.89   22.00     8853       -    0.2085         -  OK
+S6  ev       18.82    44.60    30.01     20.4   4.905   -4.89    0.80   22.00     6461   1.000    0.2097    0.1953  OK
+
+d_min/d_end: gap to leader [m]; |e_s|max, t_settle: spacing error and last time |e_s| > 0.5 m (target valid);
+jumpC5: max |a_des| change at a mode/target switch [m/s2] (C5 <= 0.1, not applied to S6 cut-in);
+E_wh: positive traction work at the wheels; E_bat: net battery energy (EV, regen included).
+== batch: all criteria OK

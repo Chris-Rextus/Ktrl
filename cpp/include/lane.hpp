@@ -28,7 +28,7 @@ public:
         const auto& s = p_.scn;
         scn_.reset();
         car_.trim(s.v0, 0.0);
-        const double d0 = s.d_init >= 0.0 ? s.d_init : p_.ctrl.d0 + p_.ctrl.h * s.v0;
+        const double d0 = s.d_init >= 0.0 ? s.d_init : p_.ctrl.d_ref(s.v0);
         lead_.reset(d0 + p_.lead.L_veh, s.v_lead0);
         ctrl_.reset(0.0);
         n_ = 0;

@@ -1,0 +1,91 @@
+:root {
+  --bg: #f5f5f2; --panel: #ffffff; --border: #d9d8d2; --text: #22221f; --muted: #6b6a64;
+  --accent: #2f6fb5; --ice: #d85a30; --ev: #1d9e75; --lead: #8a8984; --danger: #b3261e;
+  --radius: 8px;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+       background: var(--bg); color: var(--text); }
+header { display: flex; align-items: center; gap: 16px; padding: 8px 16px;
+         background: var(--panel); border-bottom: 1px solid var(--border); }
+h1 { font-size: 18px; margin: 0 8px 0 0; font-weight: 600; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+     margin: 0 0 8px; font-weight: 600; }
+nav { display: flex; gap: 4px; flex: 1; }
+button { font: inherit; padding: 6px 12px; border: 1px solid var(--border); border-radius: var(--radius);
+         background: var(--panel); color: var(--text); cursor: pointer; }
+button:hover { border-color: #b9b8b1; background: #fafaf8; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover { background: #285f9c; }
+button.small { padding: 4px 8px; font-size: 12px; }
+button:disabled { opacity: .5; cursor: default; }
+.tab { border: none; background: none; }
+.tab.active { background: var(--bg); font-weight: 600; }
+.pill { padding: 3px 10px; border-radius: 99px; background: var(--bg); border: 1px solid var(--border);
+        font-size: 12px; color: var(--muted); white-space: nowrap; }
+.pill.ok { color: #0f6e56; border-color: #9fe1cb; background: #e1f5ee; }
+.pill.bad { color: var(--danger); border-color: #f0b4ae; background: #fcebea; }
+
+.tab-page { display: none; padding: 16px; }
+.tab-page.active { display: block; }
+
+.live-grid { display: grid; grid-template-columns: 1fr 340px; gap: 16px; align-items: start; }
+.views { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+canvas { display: block; width: 100%; background: var(--panel); border: 1px solid var(--border);
+         border-radius: var(--radius); }
+.charts { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.chart { position: relative; }
+.chart-title { position: absolute; top: 6px; left: 10px; font-size: 12px; color: var(--muted); }
+.legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 14px; height: 3px; margin-right: 6px; vertical-align: middle; }
+.legend i.dashed { background: repeating-linear-gradient(90deg, var(--muted) 0 4px, transparent 4px 7px); }
+
+.controls { display: flex; flex-direction: column; gap: 12px; }
+.group { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; }
+.buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.field { display: flex; flex-direction: column; gap: 4px; margin: 8px 0 4px; font-size: 13px; }
+.field select, .field input { font: inherit; padding: 5px 6px; border: 1px solid var(--border);
+                              border-radius: 6px; background: #fff; }
+.check { display: flex; gap: 6px; align-items: center; margin: 8px 0; font-size: 13px; }
+.hint { font-size: 12px; color: var(--muted); }
+
+.seg { display: flex; margin-bottom: 8px; }
+.seg button { flex: 1; border-radius: 0; }
+.seg button:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+.seg button:last-child { border-radius: 0 var(--radius) var(--radius) 0; border-left: none; }
+.seg button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+.slider { margin: 10px 0; }
+.slider .top { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; gap: 6px; }
+.slider .top input[type=number] { width: 72px; font: inherit; padding: 2px 4px; border: 1px solid var(--border);
+                                   border-radius: 4px; text-align: right; }
+.slider input[type=range] { width: 100%; }
+.slider .scn { font-size: 11px; color: var(--muted); display: flex; gap: 4px; align-items: center; }
+.slider.from-scenario input[type=range], .slider.from-scenario input[type=number] { opacity: .45; }
+
+.console { margin-top: 12px; height: 140px; overflow: auto; background: var(--panel); border: 1px solid var(--border);
+           border-radius: var(--radius); padding: 8px; font-size: 12px; }
+.result { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px;
+          font-size: 12px; overflow: auto; max-height: 60vh; white-space: pre; }
+.result.hidden { display: none; }
+.result.bad { border-color: #f0b4ae; background: #fff6f5; }
+
+.params-bar { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-bottom: 12px; }
+.params-bar .hint:first-child { margin-right: auto; }
+.params-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; }
+.params-form .group h2 { text-transform: none; font-size: 14px; color: var(--text); letter-spacing: 0; }
+.prow { display: grid; grid-template-columns: 130px 120px 1fr; gap: 8px; align-items: center; padding: 3px 0; }
+.prow label { font-family: ui-monospace, monospace; font-size: 12px; }
+.prow input, .prow select { font: inherit; font-size: 13px; padding: 3px 5px; border: 1px solid var(--border);
+                            border-radius: 5px; width: 100%; background: #fff; }
+.prow input[type=checkbox] { width: auto; justify-self: start; }
+.prow .hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prow.dirty input, .prow.dirty select { border-color: #ef9f27; background: #fff8ec; }
+.prow.invalid input { border-color: var(--danger); background: #fff6f5; }
+
+#toast { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 6px; z-index: 10; }
+#toast div { background: #2c2c2a; color: #fff; padding: 8px 12px; border-radius: var(--radius); font-size: 13px;
+             max-width: 420px; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+#toast div.bad { background: var(--danger); }
+
+@media (max-width: 1000px) { .live-grid { grid-template-columns: 1fr; } }

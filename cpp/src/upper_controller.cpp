@@ -9,7 +9,7 @@ const UpperController::Outputs& UpperController::update(const Inputs& in) {
     // (b) follow law (static)
     bool follow_possible = in.target;
     if (follow_possible) {
-        o.d_ref = c_.d0 + c_.h * in.v;
+        o.d_ref = c_.d_ref(in.v);
         o.e_s   = in.d - o.d_ref;                                  // > 0: too far
         o.a_sv  = ((in.v_lead - in.v) + c_.lambda * o.e_s) / c_.h;
     }
@@ -40,8 +40,13 @@ const UpperController::Outputs& UpperController::update(const Inputs& in) {
             select(I_);                      // keep the old integral
         }
     } else {
-        // follow mode: track so that returning to cruise is bumpless
-        I_ = sat(o.a_des - c_.k_p * o.e_v);
+        // follow mode: track so that returning to cruise is bumpless.
+        // Not bounded to [a_min, a_max] (unlike §12.2 d): with e_v = 10 m/s,
+        // bumpless transfer needs I = a_des - 7.5, which that bound would clip,
+        // giving a jump of up to 2.5 m/s2 at the switch (criterion C5).
+        constexpr double I_LIM = 50.0;   // safety bound only
+        const double I_track = o.a_des - c_.k_p * o.e_v;
+        I_ = I_track < -I_LIM ? -I_LIM : (I_track > I_LIM ? I_LIM : I_track);
     }
 
     o.I = I_;

@@ -24,6 +24,7 @@ struct SimParams {
     std::string integrator;     // rk4 | euler
     double realtime_factor;     // 0 = max speed
     std::string on_finish;      // exit | wait
+    bool endless;               // run until stopped (duration forced to 0)
 };
 
 struct OutputParams {
@@ -107,7 +108,11 @@ struct EvParams {
 };
 
 struct CtrlParams {
-    double k_p, k_i, h, lambda, d0, d_det; 
+    double k_p, k_i, h, lambda, d0, d_det;   // sensors are ideal (no delay)
+    bool   fixed_spacing;       // false: d_ref = d0 + h*v (time gap); true: d_ref = d_set
+    double d_set;               // m   target distance when fixed_spacing
+
+    double d_ref(double v) const { return fixed_spacing ? d_set : d0 + h * v; }
 };
 
 struct LeaderParams {

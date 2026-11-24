@@ -1,7 +1,8 @@
 #pragma once
 // Upper-level controller, discrete at Ts_ctrl (§12.2), ideal sensors:
 //   cruise : PI on speed error (backward Euler)
-//   follow : constant time-headway law (CTH), d_ref = d0 + h*v
+//   follow : headway law, d_ref = d0 + h*v (time gap) or d_set (fixed);
+//            a_sv = ((v_lead - v) + lambda*(d - d_ref)) / h
 //   a_des  = sat( min(a_cr, a_sv) ), conditional integration + tracking.
 
 #include "params.hpp"

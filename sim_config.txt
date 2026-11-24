@@ -13,6 +13,7 @@ dt_ev           = 0.0002    # s   EV integration step (§5)
 integrator      = rk4       # rk4 | euler
 realtime_factor = 1.0       # 1 = wall clock, 2 = 2x faster, 0 = as fast as possible
 on_finish       = exit      # exit | wait (wait = stay alive for a restart from the viewer)
+endless         = false     # true = run until stopped (ignores duration and the preset duration)
 
 [output]
 file            = sim_output.txt
@@ -89,23 +90,25 @@ h            = 1.8          # s   time headway
 lambda       = 0.4          # 1/s
 d0           = 5.0          # m   standstill distance
 d_det        = 150.0        # m   radar range
+spacing      = fixed    # time_gap | fixed (time_gap: d_ref = d0 + h*v ; fixed: d_ref = d_set)
+d_set        = 30.0         # m   target distance when spacing = fixed
 
 # ---------------------------------------------------------------- §12.7 leader
 [leader]
 L_veh = 4.5                 # m
 
 # ---------------------------------------------------------------- §12.8 scenario
-# preset = T0 | S1 | S2 | S3 | S4 | S5 | S6 | custom
-# A preset overrides the generic fields below; 'custom' uses them as written.
+# A preset (§12.8) overwrites the fields below AND simulation.duration.
+# 'custom' uses the fields below and the duration from [simulation].
 [scenario]
-preset             = S3
+preset             = S3     # T0 | S1 | S2 | S3 | S4 | S5 | S6 | custom
 v0                 = 30.0   # m/s   initial ego speed (trim)
 v_set              = 30.0   # m/s   driver set speed
 v_set_step_time    = -1     # s     <0 = no step
 v_set_step_value   = 30.0   # m/s
 leader_present     = true
 v_lead0            = 30.0   # m/s
-d_init             = -1     # m     <0 = auto: d0 + h*v0
+d_init             = -1     # m     <0 = auto: d_ref at v0
 lead_accel         = -1.0   # m/s2
 lead_accel_start   = 10.0   # s
 lead_v_target      = 20.0   # m/s   leader holds this speed once reached
@@ -123,11 +126,13 @@ pause           = false
 stop            = false     # set to true while running to end the process
 restart_id      = 0         # change the number to restart with the whole file re-read
 # realtime_factor = 1.0     # 0 = as fast as possible
-# v_set         = 30        # driver set speed override [m/s] (or: scenario)
+v_set         = 45.0      # driver set speed override [m/s] (or: scenario)
 # leader_accel  = 0.0       # leader acceleration override [m/s2] (or: scenario)
 # h             = 1.8       # controller gains, applied live
 # lambda        = 0.4
 # d0            = 5.0
+d_set         = 17.0      # fixed target distance [m] (spacing = fixed)
+# spacing       = time_gap  # time_gap | fixed
 # k_p           = 0.75
 # k_i           = 0.1875
 # beta          = 0.0       # road grade [rad], disturbance

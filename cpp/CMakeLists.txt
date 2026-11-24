@@ -15,10 +15,12 @@ add_executable(vehicle_sim
   src/main.cpp
   src/config.cpp
   src/params.cpp
+  src/presets.cpp
   src/ice_vehicle.cpp
   src/ev_vehicle.cpp
   src/upper_controller.cpp
   src/runner.cpp
+  src/batch.cpp
   src/tests.cpp
 )
 

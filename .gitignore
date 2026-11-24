@@ -1,3 +1,6 @@
 cpp/build/
 sim_output*.txt
 *.tmp
+.venv/
+__pycache__/
+.tmp_*
