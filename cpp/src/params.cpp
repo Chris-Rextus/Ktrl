@@ -39,6 +39,9 @@ Params Params::from_config(const Config& c) {
     p.sim.realtime_factor = c.get_double("simulation.realtime_factor");
     p.sim.on_finish       = c.get_string("simulation.on_finish", "exit");
     p.sim.endless         = c.get_bool("simulation.endless", false);
+    const std::string oc  = c.get_string("simulation.on_collision", "stop_lane");
+    require(oc == "stop_lane" || oc == "continue", "simulation.on_collision must be stop_lane | continue");
+    p.sim.stop_on_collision = oc == "stop_lane";
 
     p.out.file            = c.get_string("output.file");
     p.out.period          = c.get_double("output.period");
@@ -236,6 +239,9 @@ void print_params(const Params& p, std::ostream& os) {
     os << "== scenario: " << p.scn.preset << " - " << preset_description(p.scn.preset);
     if (p.sim.endless) os << "  (endless)\n";
     else os << "  (duration " << p.sim.duration << " s)\n";
+    os << "== collision: " << (p.sim.stop_on_collision
+              ? "stop_lane (the lane that collides freezes; the run ends when all have)"
+              : "continue (flag only, the cars overlap)") << "\n";
 }
 
 // ------------------------------------------------------------------ self-test

@@ -1,9 +1,25 @@
-// Ktrl test page: live run, live parameters, all config parameters, tests/batch.
-// Talks to server/app.py: REST for commands, one WebSocket for data.
+// Ktrl viewer: run control, live parameters, road + charts, all config
+// parameters, tests and batch. Talks to server/app.py: REST for commands, one
+// WebSocket (/ws) for the live data.
+
+import { ChartGroup, ChartPanel } from "./charts.js";
+import { drawRoad } from "./road.js";
+import { DEFAULT_CHARTS, GROUP_ORDER, LANES, LANE_NAME, SIGNALS, sigInfo, signalsIn } from "./signals.js";
 
 const $ = (id) => document.getElementById(id);
 
-// ------------------------------------------------------------------ http
+// ================================================================== preferences
+// Display preferences only (theme, layout, charts). Kept in this browser; the
+// simulation parameters live in sim_config.txt.
+const PREF_KEY = "ktrl.viewer.v1";
+const prefs = Object.assign({
+  theme: "dark", view: "plots", side: true, lanes: ["ice", "ev"],
+  window: 30, cols: 2, camera: "follow", span: 160,
+  charts: DEFAULT_CHARTS, acc: {},
+}, (() => { try { return JSON.parse(localStorage.getItem(PREF_KEY)) || {}; } catch { return {}; } })());
+function savePrefs() { try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch { /* private mode */ } }
+
+// ================================================================== http + feedback
 async function call(method, url, body) {
   const r = await fetch(url, {
     method, headers: { "Content-Type": "application/json" },
@@ -12,7 +28,7 @@ async function call(method, url, body) {
   const data = await r.json().catch(() => ({}));
   if (!r.ok) {
     const msg = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail ?? data);
-    throw new Error(msg);
+    throw new Error(msg || `${r.status} ${r.statusText}`);
   }
   return data;
 }
@@ -25,27 +41,80 @@ function toast(text, bad = false) {
   el.textContent = text;
   if (bad) el.className = "bad";
   $("toast").appendChild(el);
-  setTimeout(() => el.remove(), bad ? 7000 : 3000);
+  setTimeout(() => el.remove(), bad ? 7000 : 2800);
 }
 async function safe(fn) {
   try { return await fn(); } catch (e) { toast(e.message, true); return null; }
 }
+
+// ================================================================== console drawer
+let consoleNew = 0;
 function log(line) {
   const el = $("console");
   el.textContent += line + "\n";
-  if (el.textContent.length > 50000) el.textContent = el.textContent.slice(-40000);
+  if (el.textContent.length > 60000) el.textContent = el.textContent.slice(-45000);
   el.scrollTop = el.scrollHeight;
+  if (!$("console-drawer").classList.contains("open")) {
+    consoleNew++;
+    $("console-new").textContent = consoleNew;
+    $("console-new").classList.remove("hidden");
+  }
+  $("status-msg").textContent = line.length > 140 ? line.slice(0, 140) + "…" : line;
 }
+function toggleConsole(open) {
+  const d = $("console-drawer");
+  const o = open ?? !d.classList.contains("open");
+  d.classList.toggle("open", o);
+  $("btn-console").firstChild.textContent = o ? "▾ Console " : "▴ Console ";
+  if (o) { consoleNew = 0; $("console-new").classList.add("hidden"); $("console").scrollTop = 1e9; }
+}
+$("btn-console").addEventListener("click", () => toggleConsole());
+$("btn-console-close").addEventListener("click", () => toggleConsole(false));
+$("btn-console-clear").addEventListener("click", () => { $("console").textContent = ""; });
 
-// ------------------------------------------------------------------ tabs
-document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => {
-  document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === b));
-  document.querySelectorAll(".tab-page").forEach((p) =>
-    p.classList.toggle("active", p.id === "tab-" + b.dataset.tab));
-  if (b.dataset.tab === "live") resizeCanvases();
-}));
+// ================================================================== theme
+function applyTheme() {
+  document.documentElement.dataset.theme = prefs.theme;
+  liveGroup.dirty = true;
+  batchGroup.dirty = true;
+  roadDirty = true;
+  for (const m of liveGroup.markers) m.color = getComputedStyle(document.documentElement).getPropertyValue("--bad").trim();
+}
+$("btn-theme").addEventListener("click", () => {
+  prefs.theme = prefs.theme === "dark" ? "light" : "dark";
+  savePrefs(); applyTheme();
+});
 
-// ------------------------------------------------------------------ config
+// ================================================================== views
+// 3d / plots are the two main windows (with the live controls at the side);
+// params / jobs are full-width pages.
+const VIEWS = ["3d", "plots", "params", "jobs"];
+function showView(v) {
+  if (!VIEWS.includes(v)) v = "plots";
+  prefs.view = v; savePrefs();
+  document.querySelectorAll("[data-view]").forEach((b) => b.classList.toggle("on", b.dataset.view === v));
+  document.querySelectorAll(".view").forEach((s) => s.classList.toggle("on", s.id === "view-" + v));
+  $("workspace").classList.toggle("with-side", prefs.side && (v === "3d" || v === "plots"));
+  if (v === "plots") liveGroup.dirty = true;
+  if (v === "jobs") { batchGroup.dirty = true; loadBatchList(); }
+  roadDirty = true;
+}
+document.querySelectorAll("[data-view]").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
+$("btn-side").addEventListener("click", () => {
+  prefs.side = !prefs.side; savePrefs(); showView(prefs.view);
+});
+
+// keyboard shortcuts (not while typing)
+document.addEventListener("keydown", (e) => {
+  if (e.target.closest("input, select, textarea, dialog") || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === " ") { e.preventDefault(); togglePause(); }
+  else if (e.key === "r" || e.key === "R") safe(() => POST("/api/run/restart"));
+  else if (e.key === "c" || e.key === "C") $("btn-side").click();
+  else if (e.key >= "1" && e.key <= "4") showView(VIEWS[+e.key - 1]);
+  else if (e.key === "`") toggleConsole();
+});
+
+// ================================================================== config
 let config = null;                       // {path, sections: {sec: {key: {value, type, comment, choices}}}}
 const PRESET_DESC = {
   T0: "Linearity: set speed 30 → 30.5 m/s at 5 s, no leader (40 s)",
@@ -55,53 +124,66 @@ const PRESET_DESC = {
   S4: "Leader accelerates to 30 m/s, target lost at 40 s, set speed 28 (80 s)",
   S5: "Leader brakes −3 m/s² to a standstill (40 s)",
   S6: "Cut-in 20 m ahead at 10 s, leader at 22 m/s (40 s)",
-  custom: "Uses the [scenario] fields in the Parameters tab",
+  custom: "Uses the [scenario] fields of the Parameters page",
 };
 const cfgVal = (sec, key, def) => config?.sections?.[sec]?.[key]?.value ?? def;
 
 async function loadConfig() {
   config = await GET("/api/config");
   buildParamsForm();
-  syncRunPanel();
+  buildRuntimeList();
+  syncRunBar();
   syncLiveControls();
 }
 
-// ------------------------------------------------------------------ run panel
-function syncRunPanel() {
+// ================================================================== run bar
+function syncRunBar() {
   const sel = $("sel-preset");
   const p = config.sections.scenario.preset;
   const choices = p.choices || ["T0", "S1", "S2", "S3", "S4", "S5", "S6", "custom"];
   sel.innerHTML = "";
   for (const c of choices) sel.add(new Option(c, c, false, c === p.value));
   $("preset-desc").textContent = PRESET_DESC[p.value] || "";
+  $("preset-desc").title = PRESET_DESC[p.value] || "";
   $("chk-endless").checked = cfgVal("simulation", "endless", "false") === "true";
   const rf = cfgVal("runtime", "realtime_factor", cfgVal("simulation", "realtime_factor", "1"));
-  $("sel-speed").value = String(+rf);
+  const s = $("sel-speed");
+  if (![...s.options].some((o) => +o.value === +rf)) s.add(new Option(`${+rf}×`, String(+rf)));
+  s.value = [...s.options].find((o) => +o.value === +rf).value;
 }
 
 $("sel-preset").addEventListener("change", (e) => safe(async () => {
   await PUT("/api/config", { changes: { scenario: { preset: e.target.value } } });
-  $("preset-desc").textContent = PRESET_DESC[e.target.value] || "";
-  toast(`Scenario ${e.target.value} saved - press Start or Restart`);
+  toast(`Scenario ${e.target.value} saved: press Start or Restart`);
   await loadConfig();
 }));
 $("chk-endless").addEventListener("change", (e) => safe(async () => {
   await PUT("/api/config", { changes: { simulation: { endless: e.target.checked } } });
-  toast(e.target.checked ? "Endless on - press Start or Restart" : "Endless off");
+  toast(e.target.checked ? "Endless on: press Start or Restart" : "Endless off");
   await loadConfig();
 }));
 $("sel-speed").addEventListener("change", (e) =>
   safe(() => PUT("/api/runtime", { realtime_factor: +e.target.value })));
 
 $("btn-start").addEventListener("click", () => safe(() => POST("/api/run/start", { fast: false })));
+$("btn-fast").addEventListener("click", () => safe(async () => {
+  if (cfgVal("simulation", "endless", "false") === "true") {
+    toast("Endless runs are always in real time: turn Endless off for a fast run", true);
+    return;
+  }
+  await POST("/api/run/start", { fast: true });
+}));
 $("btn-stop").addEventListener("click", () => safe(() => POST("/api/run/stop")));
 $("btn-restart").addEventListener("click", () => safe(() => POST("/api/run/restart")));
-$("btn-pause").addEventListener("click", () =>
-  safe(() => PUT("/api/runtime", { pause: status.state !== "paused" })));
+$("btn-pause").addEventListener("click", togglePause);
+function togglePause() {
+  if (status.state !== "running" && status.state !== "paused") return;
+  safe(() => PUT("/api/runtime", { pause: status.state !== "paused" }));
+}
 
-// ------------------------------------------------------------------ live controls
-// Each .slider div becomes: label, number box, range, optional "from scenario" box.
-// Changes go to [runtime] (applied within 0.1 s by the simulator).
+// ================================================================== live controls
+// Each .slider div becomes: label, number box, range, optional "from scenario"
+// box. Changes go to [runtime] and apply within 0.1 s.
 const sliders = {};
 const lastSent = {};                     // avoid sending the same value twice
 
@@ -109,14 +191,17 @@ function sendRuntime(key, value) {
   if (lastSent[key] === value) return;
   lastSent[key] = value;
   if (key === "grade") return safe(() => PUT("/api/runtime", { beta: Math.atan(value / 100) }));
-  return safe(() => PUT("/api/runtime", { [key]: value }));
+  return safe(async () => {
+    const r = await PUT("/api/runtime", { [key]: value });
+    if (config) { config.sections.runtime = r.runtime; buildRuntimeList(); markOverrides(); }
+  });
 }
 
 document.querySelectorAll(".slider").forEach((div) => {
   const d = div.dataset;
   div.innerHTML = `
     <div class="top"><span>${d.label}</span>
-      <span><input type="number" min="${d.min}" max="${d.max}" step="${d.step}"> ${d.unit}</span></div>
+      <span><input type="number" min="${d.min}" max="${d.max}" step="${d.step}"> <span class="unit">${d.unit}</span></span></div>
     <input type="range" min="${d.min}" max="${d.max}" step="${d.step}">
     ${d.scenario ? '<label class="scn"><input type="checkbox"> from scenario</label>' : ""}`;
   const num = div.querySelector("input[type=number]");
@@ -127,11 +212,12 @@ document.querySelectorAll(".slider").forEach((div) => {
 
   const set = (v) => { num.value = v; rng.value = v; };
   s.set = set;
-  rng.addEventListener("input", () => { num.value = rng.value; });
+  rng.addEventListener("input", () => { num.value = rng.value; if (d.key === "h" || d.key === "d0") updateGapHint(); });
   rng.addEventListener("change", () => commit(+rng.value));
   num.addEventListener("change", () => {
-    const v = Math.min(+d.max, Math.max(+d.min, +num.value));
-    set(v); commit(v);
+    if (num.value === "" || !isFinite(+num.value)) { num.value = rng.value; return; }
+    const v = +num.value;            // the box may go beyond the slider range
+    rng.value = v; commit(v);
   });
   function commit(v) {
     if (scn) { scn.checked = false; div.classList.remove("from-scenario"); }
@@ -145,10 +231,7 @@ document.querySelectorAll(".slider").forEach((div) => {
 });
 
 function syncLiveControls() {
-  const rt = (k) => {
-    const v = cfgVal("runtime", k);
-    return v === undefined ? undefined : v;
-  };
+  const rt = (k) => cfgVal("runtime", k);
   const ctrl = (k, def) => rt(k) ?? cfgVal("controller", k, def);
   sliders.d_set.set(+ctrl("d_set", 30));
   sliders.h.set(+ctrl("h", 1.8));
@@ -168,6 +251,17 @@ function syncLiveControls() {
   }
   setSpacingUI(ctrl("spacing", "time_gap"));
   updateGapHint();
+  markOverrides();
+}
+
+// dot next to the sliders whose value is a live override
+function markOverrides() {
+  const rt = config?.sections?.runtime || {};
+  for (const [k, s] of Object.entries(sliders)) {
+    const key = k === "grade" ? "beta" : k;
+    const v = rt[key]?.value;
+    s.div.classList.toggle("changed", v !== undefined && v !== "scenario");
+  }
 }
 
 function setSpacingUI(mode) {
@@ -182,8 +276,8 @@ document.querySelectorAll("#seg-spacing button").forEach((b) => b.addEventListen
 }));
 function updateGapHint() {
   const h = +sliders.h.num.value, d0 = +sliders.d0.num.value;
-  $("gap-hint").textContent = `Target grows with speed: d_ref = ${d0} + ${h}·v → ` +
-    `${(d0 + h * 20).toFixed(0)} m at 20 m/s, ${(d0 + h * 30).toFixed(0)} m at 30 m/s`;
+  $("gap-hint").textContent = `d_ref = ${d0} + ${h}·v  →  ${(d0 + h * 20).toFixed(0)} m at 20 m/s, ` +
+    `${(d0 + h * 30).toFixed(0)} m at 30 m/s`;
 }
 
 $("btn-reset-live").addEventListener("click", () => safe(async () => {
@@ -197,12 +291,305 @@ $("btn-reset-live").addEventListener("click", () => safe(async () => {
     beta: +cfgVal("environment", "beta", 0),
   });
   await loadConfig();
-  toast("Live controls reset to the scenario and [controller] values");
+  toast("Live controls back to the scenario and [controller] values");
 }));
 
-// ------------------------------------------------------------------ parameters tab
-// One form field per config key (all sections except [runtime]).
+// accordion state
+document.querySelectorAll("details.acc").forEach((d) => {
+  if (prefs.acc[d.dataset.acc] === false) d.open = false;
+  d.addEventListener("toggle", () => { prefs.acc[d.dataset.acc] = d.open; savePrefs(); });
+});
+
+// vehicles shown
+function syncLanes() {
+  document.querySelectorAll("#seg-lanes button").forEach((b) =>
+    b.classList.toggle("on", prefs.lanes.includes(b.dataset.value)));
+  liveGroup.lanes = prefs.lanes; batchGroup.lanes = LANES;
+  liveGroup.dirty = true; roadDirty = true;
+  renderReadoutsFrame();
+}
+document.querySelectorAll("#seg-lanes button").forEach((b) => b.addEventListener("click", () => {
+  const l = b.dataset.value;
+  const set = new Set(prefs.lanes);
+  set.has(l) ? set.delete(l) : set.add(l);
+  if (!set.size) return toast("Keep at least one vehicle shown", true);
+  prefs.lanes = LANES.filter((x) => set.has(x));
+  savePrefs(); syncLanes();
+}));
+
+// ================================================================== live data (WebSocket)
+let columns = [], rows = [], meta = {}, status = {};
+const MAX_ROWS = 30000;                   // 10 min at 50 Hz (same as the server)
+let roadDirty = true;
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  const conn = $("conn");
+  ws.onopen = () => { conn.className = "conn ok"; conn.lastChild.textContent = "connected"; };
+  ws.onclose = () => {
+    conn.className = "conn bad"; conn.lastChild.textContent = "reconnecting";
+    setTimeout(connect, 1000);
+  };
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    switch (m.type) {
+      case "snapshot":
+        columns = m.columns; rows = m.rows; meta = m.meta; resetCollisions(); showStatus(m.status);
+        newData(true); break;
+      case "header":
+        columns = m.columns; rows = []; meta = m.meta; resetCollisions();
+        log(`[run] new run ${m.run_id}`);
+        liveGroup.resetView(); newData(true); break;
+      case "rows":
+        for (const r of m.rows) rows.push(r);
+        if (rows.length > MAX_ROWS * 1.1) rows.splice(0, rows.length - MAX_ROWS);
+        newData(false); break;
+      case "status": showStatus(m); break;
+      case "console": log(`[${m.source}] ${m.line}`); break;
+      case "console_history": m.lines.forEach(log); break;
+      case "error": log("[error] " + m.message); break;
+    }
+  };
+}
+
+function newData(structural) {
+  liveGroup.dirty = true; roadDirty = true; readoutsDirty = true;
+  if (structural) renderReadoutsFrame();
+  detectCollisions();
+}
+
+// ------------------------------------------------------------------ collisions
+// From the <lane>_collided column: time of first contact and closing speed.
+// The simulator freezes a lane at contact when simulation.on_collision =
+// stop_lane (the default), so its values stay at the instant of impact.
+let collisions = {};                      // {lane: {t, v, stopped}}
+let collisionHidden = false;
+function resetCollisions() {
+  collisions = {}; collisionHidden = false;
+  liveGroup.markers = [];
+  showCollisionBanner();
+}
+function detectCollisions() {
+  if (!rows.length) return;
+  const idx = Object.fromEntries(columns.map((n, i) => [n, i]));
+  const last = rows[rows.length - 1];
+  let added = false;
+  for (const l of LANES) {
+    const ci = idx[`${l}_collided`];
+    if (ci === undefined || collisions[l] || !(last[ci] > 0.5)) continue;
+    let k = rows.length - 1;                       // first row with the flag set
+    while (k > 0 && rows[k - 1][ci] > 0.5) k--;
+    const r = rows[k];
+    collisions[l] = {
+      t: r[0],
+      v: (r[idx[`${l}_v`]] ?? 0) - (r[idx[`${l}_lead_v`]] ?? 0),
+      stopped: cfgVal("simulation", "on_collision", "stop_lane") !== "continue",
+    };
+    added = true;
+  }
+  if (!added) return;
+  liveGroup.markers = Object.entries(collisions).map(([l, c]) =>
+    ({ t: c.t, label: `${LANE_NAME[l]} collision`, color: getComputedStyle(document.documentElement).getPropertyValue("--bad").trim() }));
+  liveGroup.dirty = true; roadDirty = true; readoutsDirty = true;
+  showCollisionBanner();
+}
+function showCollisionBanner() {
+  const lanes = Object.keys(collisions);
+  $("collision-banner").classList.toggle("hidden", !lanes.length || collisionHidden);
+  $("collision-text").innerHTML = lanes.map((l) => {
+    const c = collisions[l];
+    return `<div>COLLISION · ${LANE_NAME[l]} hit the car ahead at t = ${c.t.toFixed(2)} s` +
+      `<small>closing speed ${c.v.toFixed(1)} m/s (${(c.v * 3.6).toFixed(0)} km/h) · ` +
+      `${c.stopped ? "this lane is stopped" : "simulation continued (on_collision = continue)"}</small></div>`;
+  }).join("");
+}
+$("btn-coll-hide").addEventListener("click", () => { collisionHidden = true; showCollisionBanner(); });
+$("btn-coll-restart").addEventListener("click", () => safe(() => POST("/api/run/restart")));
+
+function showStatus(s) {
+  if (!s || !s.state) return;
+  status = s;
+  const st = $("st-state");
+  st.textContent = s.state;
+  st.className = "badge " + ({ running: "ok", paused: "warn", error: "bad", collision: "bad", done: "accent" }[s.state] || "");
+  $("st-bar").parentElement.classList.toggle("bad", s.state === "collision" || /\S/.test(s.collided || ""));
+  const dur = +s.duration;
+  $("st-time").textContent = `t = ${(+s.t || 0).toFixed(1)} s` + (dur > 0 ? ` / ${dur.toFixed(0)} s` : " · endless");
+  const bar = $("st-bar");
+  bar.parentElement.classList.toggle("endless", !(dur > 0) && s.state === "running");
+  bar.style.width = dur > 0 ? `${Math.min(100, 100 * (+s.t || 0) / dur)}%` : "0";
+  const extra = [`run ${s.run_id ?? "–"}`, s.realtime_factor ? `${s.realtime_factor}×` : "fast"];
+  if (+s.lag > 0.05) extra.push(`lag ${(+s.lag).toFixed(2)} s`);
+  $("st-extra").textContent = extra.join(" · ");
+  $("st-extra").title = s.message || "";
+  $("btn-pause").textContent = s.state === "paused" ? "▶ Resume" : "❚❚ Pause";
+  $("btn-pause").disabled = !(s.state === "running" || s.state === "paused");
+}
+
+// ================================================================== plots view
+const liveGroup = new ChartGroup(() => ({ columns, rows }), { live: true });
+const batchGroup = new ChartGroup(() => batchData, { live: false });
+let batchData = { columns: [], rows: [] };
+
+liveGroup.onViewChange = () => {
+  $("btn-follow").classList.toggle("on", liveGroup.follow);
+  $("btn-follow").textContent = liveGroup.follow ? "● Live" : "❚❚ Zoomed: back to live";
+};
+
+function buildCharts() {
+  liveGroup.clear();
+  const grid = $("chart-grid");
+  grid.style.setProperty("--cols", prefs.cols);
+  prefs.charts.forEach((spec, i) => {
+    const p = new ChartPanel(grid, spec, {
+      onEdit: (panel) => editChart(prefs.charts.indexOf(panel.spec), panel),
+      onRemove: (panel) => {
+        prefs.charts = prefs.charts.filter((s) => s !== panel.spec);
+        savePrefs(); buildCharts();
+      },
+    });
+    liveGroup.add(p);
+    void i;
+  });
+}
+
+function setSeg(id, value) {
+  document.querySelectorAll(`#${id} button`).forEach((b) => b.classList.toggle("on", b.dataset.value === String(value)));
+}
+document.querySelectorAll("#seg-window button").forEach((b) => b.addEventListener("click", () => {
+  prefs.window = b.dataset.value === "Infinity" ? Infinity : +b.dataset.value;
+  liveGroup.window = prefs.window; savePrefs(); setSeg("seg-window", b.dataset.value);
+  liveGroup.resetView();
+}));
+document.querySelectorAll("#seg-cols button").forEach((b) => b.addEventListener("click", () => {
+  prefs.cols = +b.dataset.value; savePrefs(); setSeg("seg-cols", prefs.cols);
+  $("chart-grid").style.setProperty("--cols", prefs.cols); liveGroup.dirty = true;
+}));
+$("btn-follow").addEventListener("click", () => liveGroup.resetView());
+$("btn-add-chart").addEventListener("click", () => editChart(-1));
+$("btn-reset-layout").addEventListener("click", () => {
+  prefs.charts = structuredClone(DEFAULT_CHARTS); prefs.cols = 2;
+  savePrefs(); setSeg("seg-cols", 2); buildCharts();
+});
+
+// road camera
+document.querySelectorAll("#seg-camera button").forEach((b) => b.addEventListener("click", () => {
+  prefs.camera = b.dataset.value; savePrefs(); syncCamera();
+}));
+$("rng-span").addEventListener("input", (e) => { prefs.span = +e.target.value; savePrefs(); syncCamera(); });
+function syncCamera() {
+  setSeg("seg-camera", prefs.camera);
+  $("rng-span").value = prefs.span;
+  $("span-val").textContent = `${prefs.span} m`;
+  $("span-box").style.opacity = prefs.camera === "fit" ? 0.4 : 1;
+  roadDirty = true;
+}
+
+// CSV of the current run (what this browser holds)
+$("btn-csv").addEventListener("click", () => {
+  if (!rows.length) return toast("No data yet", true);
+  const lines = [columns.join(",")];
+  for (const r of rows) lines.push(r.map((v) => (v == null ? "" : v)).join(","));
+  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `ktrl_run${status.run_id ?? ""}_${meta.scenario || "run"}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+
+// ------------------------------------------------------------------ chart editor
+function editChart(index, panel, group = liveGroup) {
+  const dlg = $("dlg-chart");
+  const spec = index >= 0 ? (panel?.spec ?? prefs.charts[index]) : { title: "New chart", sigs: ["v"] };
+  $("dlg-title").textContent = index >= 0 ? "Edit chart" : "Add a chart";
+  $("dlg-name").value = spec.title;
+  $("dlg-zero").checked = !!spec.zero;
+  const have = signalsIn(group.source().columns);
+  const known = have.length ? have : Object.keys(SIGNALS);
+  const chosen = new Set(spec.sigs);
+  const box = $("dlg-sigs");
+  box.innerHTML = "";
+  const groups = {};
+  for (const s of known) (groups[sigInfo(s).group] ??= []).push(s);
+  for (const gname of [...GROUP_ORDER, ...Object.keys(groups).filter((g) => !GROUP_ORDER.includes(g))]) {
+    if (!groups[gname]) continue;
+    const g = document.createElement("div");
+    g.className = "sig-group";
+    g.innerHTML = `<b>${gname}</b><div class="chips"></div>`;
+    for (const s of groups[gname]) {
+      const info = sigInfo(s);
+      const c = document.createElement("span");
+      c.className = "chip" + (chosen.has(s) ? " on" : "");
+      c.title = info.label + (info.unit ? ` [${info.unit}]` : "");
+      c.textContent = s + (info.unit ? `  ·  ${info.unit}` : "");
+      c.addEventListener("click", () => {
+        chosen.has(s) ? chosen.delete(s) : chosen.add(s);
+        c.classList.toggle("on", chosen.has(s));
+      });
+      g.lastChild.appendChild(c);
+    }
+    box.appendChild(g);
+  }
+  dlg.onclose = () => {
+    if (dlg.returnValue !== "ok") return;
+    if (!chosen.size) return toast("Choose at least one signal", true);
+    const order = known.filter((s) => chosen.has(s));
+    const next = { title: $("dlg-name").value.trim() || order.join(", "), sigs: order, zero: $("dlg-zero").checked };
+    if (group === batchGroup) { panel.setSpec(next); return; }
+    if (index >= 0) prefs.charts[index] = next; else prefs.charts.push(next);
+    savePrefs(); buildCharts();
+  };
+  dlg.returnValue = "";
+  dlg.showModal();
+}
+
+// ================================================================== 3D view readouts
+let readoutsDirty = true;
+const READOUT = [
+  ["v", "speed", "m/s"], ["a", "accel.", "m/s²"], ["v_set", "set speed", "m/s"],
+  ["d", "distance", "m"], ["d_ref", "target", "m"], ["e_s", "spacing err.", "m"],
+  ["F_t", "traction", "N"], ["F_b", "brake", "N"], ["lead_v", "leader", "m/s"],
+];
+function renderReadoutsFrame() {
+  const box = $("readouts");
+  const lanes = prefs.lanes.filter((l) => columns.includes(l + "_v"));
+  box.innerHTML = lanes.map((l) => `
+    <div class="readout" data-lane="${l}">
+      <div class="rh"><i style="background:var(--${l})"></i>${LANE_NAME[l]}
+        <span class="badge" data-k="mode">–</span></div>
+      <dl>${READOUT.map(([k, lbl, u]) => `<div><dt>${lbl} <small>${u}</small></dt><dd data-k="${k}">–</dd></div>`).join("")}</dl>
+    </div>`).join("") || '<div class="readout muted">No data yet: press Start.</div>';
+  readoutsDirty = true;
+}
+function updateReadouts() {
+  if (!readoutsDirty || !rows.length) return;
+  readoutsDirty = false;
+  const last = rows[rows.length - 1];
+  const idx = Object.fromEntries(columns.map((n, i) => [n, i]));
+  document.querySelectorAll(".readout[data-lane]").forEach((el) => {
+    const l = el.dataset.lane;
+    const val = (k) => last[idx[`${l}_${k}`]];
+    const leadOn = val("lead_on") > 0.5, target = val("target") > 0.5;
+    for (const [k] of READOUT) {
+      const dd = el.querySelector(`[data-k="${k}"]`);
+      let v = val(k);
+      if ((k === "d" || k === "lead_v") && !leadOn) v = null;
+      if ((k === "d_ref" || k === "e_s") && !target) v = null;
+      dd.textContent = v == null ? "–" : Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2);
+    }
+    const m = el.querySelector('[data-k="mode"]');
+    const follow = val("mode") > 0.5;
+    m.textContent = val("collided") > 0.5 ? "COLLISION" : follow ? "distance loop" : "speed loop";
+    m.className = "badge " + (val("collided") > 0.5 ? "bad" : follow ? "accent" : "ok");
+    el.classList.toggle("collided", val("collided") > 0.5);
+  });
+}
+
+// ================================================================== parameters page
 const edits = {};                        // {section: {key: value}}
+const collapsed = new Set(JSON.parse(localStorage.getItem("ktrl.params.collapsed") || "[]"));
 
 function buildParamsForm() {
   const form = $("params-form");
@@ -210,42 +597,71 @@ function buildParamsForm() {
   $("params-path").textContent = config.path;
   for (const [sec, keys] of Object.entries(config.sections)) {
     if (sec === "runtime") continue;
-    const g = document.createElement("div");
-    g.className = "group";
-    g.innerHTML = `<h2>[${sec}]</h2>`;
-    for (const [key, f] of Object.entries(keys)) g.appendChild(paramRow(sec, key, f));
-    form.appendChild(g);
+    const card = document.createElement("div");
+    card.className = "card psec" + (collapsed.has(sec) ? " collapsed" : "");
+    card.dataset.sec = sec;
+    card.innerHTML = `<div class="card-head"><h3>[${sec}]</h3><div class="spacer"></div>
+      <span class="badge tiny hidden"></span><span class="muted">${collapsed.has(sec) ? "▸" : "▾"}</span></div>
+      <div class="prows"></div>`;
+    card.querySelector(".card-head").addEventListener("click", () => {
+      card.classList.toggle("collapsed");
+      card.querySelector(".card-head .muted").textContent = card.classList.contains("collapsed") ? "▸" : "▾";
+      card.classList.contains("collapsed") ? collapsed.add(sec) : collapsed.delete(sec);
+      try { localStorage.setItem("ktrl.params.collapsed", JSON.stringify([...collapsed])); } catch { /* */ }
+    });
+    const box = card.querySelector(".prows");
+    for (const [key, f] of Object.entries(keys)) box.appendChild(paramRow(sec, key, f));
+    form.appendChild(card);
   }
+  filterParams();
   updateDirty();
 }
+
+// keys the live controls may override ([runtime] key -> [section] key)
+const OVERRIDES = { controller: ["k_p", "k_i", "h", "lambda", "d0", "d_set", "spacing"],
+                    environment: ["beta"], scenario: ["v_set"], simulation: ["realtime_factor"] };
 
 function paramRow(sec, key, f) {
   const row = document.createElement("div");
   row.className = "prow";
+  row.dataset.search = `${sec} ${key} ${f.comment || ""}`.toLowerCase();
   const pending = edits[sec]?.[key];
   let input;
   if (f.type === "choice") {
     input = document.createElement("select");
     for (const c of f.choices) input.add(new Option(c, c, false, c === (pending ?? f.value)));
   } else if (f.type === "bool") {
-    input = document.createElement("input");
-    input.type = "checkbox";
-    input.checked = (pending ?? f.value) === true || (pending ?? f.value) === "true";
+    const lbl = document.createElement("label");
+    lbl.className = "switch";
+    lbl.innerHTML = '<input type="checkbox"><i></i>';
+    input = lbl.querySelector("input");
+    input.checked = String(pending ?? f.value) === "true";
+    row.innerHTML = `<label title="${sec}.${key}">${key}</label>`;
+    row.appendChild(lbl);
   } else {
     input = document.createElement("input");
     input.value = pending ?? f.value;
+    input.spellcheck = false;
   }
-  row.innerHTML = `<label title="${sec}.${key}">${key}</label>`;
-  row.appendChild(input);
+  if (f.type !== "bool") {
+    row.innerHTML = `<label title="${sec}.${key}">${key}</label>`;
+    row.appendChild(input);
+  }
   const hint = document.createElement("span");
   hint.className = "hint";
   hint.textContent = f.comment || "";
   hint.title = f.comment || "";
   row.appendChild(hint);
   if (pending !== undefined) row.classList.add("dirty");
+  const rtKey = OVERRIDES[sec]?.includes(key) ? key : null;
+  const rtv = rtKey ? config.sections.runtime?.[rtKey]?.value : undefined;
+  if (rtv !== undefined && rtv !== "scenario") {
+    row.classList.add("overridden");
+    row.title = `Overridden live: [runtime] ${rtKey} = ${rtv}`;
+  }
 
   input.addEventListener(f.type === "bool" || f.type === "choice" ? "change" : "input", () => {
-    let v = f.type === "bool" ? input.checked : input.value.trim();
+    const v = f.type === "bool" ? input.checked : input.value.trim();
     const bad = f.type === "number" && (v === "" || !isFinite(Number(v)));
     row.classList.toggle("invalid", bad);
     const original = f.type === "bool" ? f.value === "true" : f.value;
@@ -259,16 +675,39 @@ function paramRow(sec, key, f) {
   return row;
 }
 
+function filterParams() {
+  const q = $("params-search").value.trim().toLowerCase();
+  document.querySelectorAll(".psec").forEach((card) => {
+    let n = 0;
+    card.querySelectorAll(".prow").forEach((r) => {
+      const hit = !q || r.dataset.search.includes(q);
+      r.style.display = hit ? "" : "none";
+      n += hit;
+    });
+    card.style.display = n ? "" : "none";
+    if (q && n) card.classList.remove("collapsed");
+  });
+}
+$("params-search").addEventListener("input", filterParams);
+
 function updateDirty() {
   const n = Object.values(edits).reduce((a, s) => a + Object.keys(s).length, 0);
-  $("params-dirty").textContent = n ? `${n} unsaved change${n > 1 ? "s" : ""}` : "no changes";
+  const b = $("params-dirty");
+  b.textContent = n ? `${n} unsaved change${n > 1 ? "s" : ""}` : "no changes";
+  b.className = "badge" + (n ? " warn" : "");
   ["btn-discard", "btn-validate", "btn-save", "btn-save-restart"].forEach((id) => ($(id).disabled = !n));
+  document.querySelectorAll(".psec").forEach((card) => {
+    const k = Object.keys(edits[card.dataset.sec] || {}).length;
+    const badge = card.querySelector(".card-head .badge");
+    badge.textContent = k; badge.classList.toggle("hidden", !k); badge.classList.toggle("warn", !!k);
+  });
 }
 function showResult(text, bad) {
   const el = $("params-result");
   el.textContent = text;
   el.classList.remove("hidden");
   el.classList.toggle("bad", bad);
+  el.classList.toggle("good", !bad);
 }
 
 $("btn-discard").addEventListener("click", () => {
@@ -278,7 +717,7 @@ $("btn-discard").addEventListener("click", () => {
 });
 $("btn-validate").addEventListener("click", () => safe(async () => {
   const r = await POST("/api/config/validate", { changes: edits });
-  showResult(r.ok ? "OK - the simulator accepts these values.\n\n" + r.output : r.output, !r.ok);
+  showResult(r.ok ? "OK: the simulator accepts these values.\n\n" + r.output : r.output, !r.ok);
 }));
 async function save(restart) {
   try {
@@ -295,213 +734,148 @@ async function save(restart) {
 $("btn-save").addEventListener("click", () => save(false));
 $("btn-save-restart").addEventListener("click", () => save(true));
 
-// ------------------------------------------------------------------ jobs tab
+// ------------------------------------------------------------------ [runtime] overrides
+const RT_FIXED = new Set(["pause", "stop", "restart_id"]);
+function buildRuntimeList() {
+  const box = $("runtime-list");
+  const rt = config.sections.runtime || {};
+  const keys = Object.keys(rt).filter((k) => !RT_FIXED.has(k));
+  box.innerHTML = keys.length ? "" : '<span class="muted small">None: the run uses the values below.</span>';
+  for (const k of keys) {
+    const c = document.createElement("span");
+    c.className = "chip on";
+    let v = rt[k].value;
+    if (k === "beta") v = `${v} rad (${(Math.tan(+v) * 100).toFixed(1)} %)`;
+    c.innerHTML = `<b class="mono">${k}</b> = <span class="mono">${v}</span> <span class="x" title="Remove">✕</span>`;
+    c.querySelector(".x").addEventListener("click", () => safe(async () => {
+      delete lastSent[k === "beta" ? "grade" : k];
+      await PUT("/api/runtime", { [k]: null });
+      await loadConfig();
+    }));
+    box.appendChild(c);
+  }
+  $("btn-clear-runtime").disabled = !keys.length;
+}
+$("btn-clear-runtime").addEventListener("click", () => safe(async () => {
+  const rt = config.sections.runtime || {};
+  const body = Object.fromEntries(Object.keys(rt).filter((k) => !RT_FIXED.has(k)).map((k) => [k, null]));
+  for (const k of Object.keys(lastSent)) delete lastSent[k];
+  await PUT("/api/runtime", body);
+  await loadConfig();
+  toast("Live overrides cleared");
+}));
+
+// ================================================================== tests & batch page
 const PRESETS = ["T0", "S1", "S2", "S3", "S4", "S5", "S6"];
 for (const p of PRESETS) {
-  const l = document.createElement("label");
-  l.className = "check";
-  l.innerHTML = `<input type="checkbox" value="${p}" checked> ${p}`;
-  $("batch-presets").appendChild(l);
+  const c = document.createElement("span");
+  c.className = "chip on";
+  c.dataset.value = p;
+  c.textContent = p;
+  c.title = PRESET_DESC[p];
+  c.addEventListener("click", () => c.classList.toggle("on"));
+  $("batch-presets").appendChild(c);
 }
 async function runJob(btn, url, body) {
   btn.disabled = true;
-  $("job-output").textContent = "running...";
+  const badge = $("job-badge");
+  badge.textContent = "running…"; badge.className = "badge warn";
+  $("job-output").textContent = "running…";
   try {
     const r = await POST(url, body);
     $("job-output").textContent = `${r.command}\nexit code ${r.returncode} in ${r.seconds} s\n\n${r.output}`;
+    badge.textContent = r.returncode === 0 ? "all OK" : `failed (${r.returncode})`;
+    badge.className = "badge " + (r.returncode === 0 ? "ok" : "bad");
+    if (r.files) showBatchList(r);
   } catch (e) {
     $("job-output").textContent = e.message;
+    badge.textContent = "error"; badge.className = "badge bad";
   } finally {
     btn.disabled = false;
   }
 }
-$("btn-tests").addEventListener("click", (e) => runJob(e.target, "/api/tests"));
+$("btn-tests").addEventListener("click", (e) => runJob(e.currentTarget, "/api/tests"));
 $("btn-batch").addEventListener("click", (e) => {
-  const chosen = [...document.querySelectorAll("#batch-presets input:checked")].map((i) => i.value);
-  runJob(e.target, "/api/batch", { presets: chosen.length === PRESETS.length ? [] : chosen });
+  const chosen = [...document.querySelectorAll("#batch-presets .chip.on")].map((c) => c.dataset.value);
+  if (!chosen.length) return toast("Choose at least one scenario", true);
+  runJob(e.currentTarget, "/api/batch", { presets: chosen.length === PRESETS.length ? [] : chosen });
 });
 
-// ------------------------------------------------------------------ live data (WebSocket)
-let columns = [], rows = [], meta = {}, status = {};
-const col = (name) => columns.indexOf(name);
-const MAX_ROWS = 30000;                   // 10 min at 50 Hz
+async function loadBatchList() { const r = await safe(() => GET("/api/batch")); if (r) showBatchList(r); }
+$("btn-batch-refresh").addEventListener("click", loadBatchList);
 
-function connect() {
-  const ws = new WebSocket(`ws://${location.host}/ws`);
-  ws.onopen = () => { $("conn").textContent = "connected"; $("conn").className = "pill ok"; };
-  ws.onclose = () => {
-    $("conn").textContent = "disconnected"; $("conn").className = "pill bad";
-    setTimeout(connect, 1000);
-  };
-  ws.onmessage = (ev) => {
-    const m = JSON.parse(ev.data);
-    switch (m.type) {
-      case "snapshot": columns = m.columns; rows = m.rows; meta = m.meta; showStatus(m.status); break;
-      case "header": columns = m.columns; rows = []; meta = m.meta; log(`[run] new run ${m.run_id}`); break;
-      case "rows":
-        for (const r of m.rows) rows.push(r);
-        if (rows.length > MAX_ROWS * 1.1) rows.splice(0, rows.length - MAX_ROWS);
-        break;
-      case "status": showStatus(m); break;
-      case "console": log(`[${m.source}] ${m.line}`); break;
-      case "console_history": m.lines.forEach(log); break;
-      case "error": log("[error] " + m.message); break;
-    }
-  };
-}
-
-function showStatus(s) {
-  if (!s || !s.state) return;
-  status = s;
-  const dur = +s.duration > 0 ? ` / ${(+s.duration).toFixed(0)} s` : " (endless)";
-  $("state").textContent = `${s.state} · run ${s.run_id} · t = ${(+s.t).toFixed(1)} s${dur} · ${s.realtime_factor}×`;
-  $("state").className = "pill" + (s.state === "running" ? " ok" : s.state === "error" ? " bad" : "");
-  $("btn-pause").textContent = s.state === "paused" ? "Resume" : "Pause";
-}
-
-// ------------------------------------------------------------------ drawing
-const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
-const COLORS = {};
-
-function resizeCanvases() {
-  for (const c of document.querySelectorAll("canvas")) {
-    const w = c.clientWidth;
-    if (w > 0 && c.width !== Math.round(w * devicePixelRatio)) {
-      c.width = Math.round(w * devicePixelRatio);
-      c.height = Math.round(+c.getAttribute("height") * devicePixelRatio);
-      c.style.height = c.getAttribute("height") + "px";
-    }
+function showBatchList(r) {
+  $("batch-summary").textContent = r.summary || "No batch yet.";
+  const failed = new Set();
+  for (const line of (r.summary || "").split("\n")) {
+    const m = line.match(/^(\S+)\s+(ice|ev)\s.*FAIL/);
+    if (m) failed.add(`${m[1]}_${m[2]}.txt`);
+  }
+  const box = $("batch-files");
+  box.innerHTML = "";
+  for (const f of r.files) {
+    const c = document.createElement("span");
+    c.className = "chip" + (failed.has(f) ? " fail" : "") + (f === batchFile ? " on" : "");
+    c.textContent = f.replace(".txt", "");
+    c.title = failed.has(f) ? "criteria failed" : "";
+    c.addEventListener("click", () => openBatchFile(f));
+    box.appendChild(c);
   }
 }
-window.addEventListener("resize", resizeCanvases);
 
-function drawRoad(last) {
-  const c = $("road"), g = c.getContext("2d"), k = devicePixelRatio;
-  g.setTransform(k, 0, 0, k, 0, 0);
-  const W = c.width / k, H = c.height / k;
-  g.clearRect(0, 0, W, H);
-  const lanes = ["ice", "ev"].filter((p) => col(p + "_x") >= 0);
-  if (!lanes.length) return;
-  const L = +(meta.L_veh || 4.5);
-  const span = 160, sc = W / span;                                   // 160 m visible
-  const ref = Math.min(...lanes.map((p) => last[col(p + "_x")])) - 25;
-  g.font = "12px system-ui";
-
-  lanes.forEach((p, i) => {
-    const y = 55 + i * 85;
-    g.fillStyle = "#e9e8e3"; g.fillRect(0, y - 22, W, 44);
-    g.strokeStyle = "#fff"; g.setLineDash([12, 12]); g.lineDashOffset = (ref * sc) % 24;
-    g.beginPath(); g.moveTo(0, y + 22); g.lineTo(W, y + 22); g.stroke(); g.setLineDash([]);
-
-    const xe = last[col(p + "_x")], xl = last[col(p + "_lead_x")];
-    const leadOn = last[col(p + "_lead_on")] > 0.5;
-    const d = last[col(p + "_d")], dref = last[col(p + "_d_ref")];
-    const mode = last[col(p + "_mode")] > 0.5 ? "FOLLOW (distance)" : "CRUISE (speed)";
-
-    // target distance marker (where the ego front bumper should be)
-    if (leadOn && dref > 0) {
-      const xt = (xl - L - dref - ref) * sc;
-      g.strokeStyle = COLORS.lead; g.setLineDash([4, 4]);
-      g.beginPath(); g.moveTo(xt, y - 22); g.lineTo(xt, y + 22); g.stroke(); g.setLineDash([]);
-    }
-    // gap bar
-    if (leadOn) {
-      const tooClose = dref > 0 && d < 0.8 * dref;
-      g.fillStyle = tooClose ? "rgba(179,38,30,.25)" : "rgba(47,111,181,.15)";
-      g.fillRect((xe - ref) * sc, y - 4, Math.max(0, d) * sc, 8);
-    }
-    // cars (x = front bumper)
-    const brake = last[col(p + "_F_b")] > 50;
-    g.fillStyle = p === "ice" ? COLORS.ice : COLORS.ev;
-    g.fillRect((xe - L - ref) * sc, y - 9, L * sc, 18);
-    if (brake) { g.fillStyle = "#ff3b30"; g.fillRect((xe - L - ref) * sc - 2, y - 9, 3, 18); }
-    if (leadOn) {
-      g.fillStyle = COLORS.lead;
-      g.fillRect((xl - L - ref) * sc, y - 9, L * sc, 18);
-    }
-    g.fillStyle = "#22221f";
-    g.fillText(`${p.toUpperCase()}  v = ${last[col(p + "_v")].toFixed(1)} m/s` +
-      (leadOn ? `   d = ${d.toFixed(1)} m (target ${dref.toFixed(1)} m)` : "   no car ahead") +
-      `   ${mode}`, 8, y - 28);
-  });
-}
-
-function drawChart(id, series, yLabelMin, yLabelMax) {
-  const c = $(id), g = c.getContext("2d"), k = devicePixelRatio;
-  g.setTransform(k, 0, 0, k, 0, 0);
-  const W = c.width / k, H = c.height / k, padL = 40, padT = 24, padB = 18;
-  g.clearRect(0, 0, W, H);
-  if (!rows.length) return;
-  const t1 = rows[rows.length - 1][0], t0 = Math.max(rows[0][0], t1 - 30);  // last 30 s
-  let lo = Infinity, hi = -Infinity;
-  let start = rows.length - 1;
-  while (start > 0 && rows[start - 1][0] >= t0) start--;
-  for (const s of series) {
-    const ci = col(s.name); if (ci < 0) continue;
-    for (let i = start; i < rows.length; i++) {
-      const v = rows[i][ci]; if (v == null) continue;
-      if (s.onlyIf && rows[i][col(s.onlyIf)] < 0.5) continue;
-      lo = Math.min(lo, v); hi = Math.max(hi, v);
+let batchFile = null;
+const BATCH_CHARTS = [
+  { title: "Speed", sigs: ["v", "v_set", "lead_v"] },
+  { title: "Distance and target distance", sigs: ["d", "d_ref"], zero: true },
+  { title: "Acceleration", sigs: ["a", "a_des"] },
+];
+async function openBatchFile(name) {
+  const data = await safe(() => GET(`/api/batch/${name}`));
+  if (!data) return;
+  batchFile = name;
+  batchData = { columns: data.columns, rows: data.rows };
+  document.querySelectorAll("#batch-files .chip").forEach((c) => c.classList.toggle("on", c.textContent + ".txt" === name));
+  $("batch-view-title").textContent = `Batch run: ${name.replace(".txt", "")}`;
+  $("batch-view-hint").textContent = "drag to zoom · double-click for the whole run";
+  if (!batchGroup.charts.length) {
+    for (const spec of BATCH_CHARTS) {
+      batchGroup.add(new ChartPanel($("batch-charts"), structuredClone(spec), {
+        onEdit: (panel) => editChart(0, panel, batchGroup),
+      }));
     }
   }
-  if (!isFinite(lo)) return;
-  if (yLabelMin !== undefined) lo = Math.min(lo, yLabelMin);
-  if (yLabelMax !== undefined) hi = Math.max(hi, yLabelMax);
-  const pad = (hi - lo) * 0.1 || 1;
-  lo = yLabelMin === 0 && lo >= 0 ? 0 : lo - pad;          // distances start at 0
-  hi += pad;
-  const X = (t) => padL + (t - t0) / Math.max(t1 - t0, 1e-6) * (W - padL - 8);
-  const Y = (v) => padT + (hi - v) / (hi - lo) * (H - padT - padB);
+  batchGroup.resetView();
+}
 
-  g.strokeStyle = "#ecebe6"; g.fillStyle = "#6b6a64"; g.font = "11px system-ui"; g.lineWidth = 1;
-  for (let j = 0; j <= 3; j++) {
-    const v = lo + (hi - lo) * j / 3, y = Y(v);
-    g.beginPath(); g.moveTo(padL, y); g.lineTo(W - 8, y); g.stroke();
-    g.fillText(v.toFixed(Math.abs(hi - lo) < 5 ? 2 : 0), 4, y + 4);
-  }
-  g.fillText(`${t0.toFixed(0)} s`, padL, H - 4);
-  g.fillText(`${t1.toFixed(1)} s`, W - 50, H - 4);
-
-  for (const s of series) {
-    const ci = col(s.name); if (ci < 0) continue;
-    g.strokeStyle = s.color; g.lineWidth = s.width || 1.5; g.setLineDash(s.dash ? [5, 4] : []);
-    g.beginPath();
-    let pen = false;
-    for (let i = start; i < rows.length; i++) {
-      const r = rows[i], v = r[ci];
-      if (v == null || (s.onlyIf && r[col(s.onlyIf)] < 0.5)) { pen = false; continue; }
-      pen ? g.lineTo(X(r[0]), Y(v)) : g.moveTo(X(r[0]), Y(v)); pen = true;
+// ================================================================== render loop
+function frame() {
+  requestAnimationFrame(frame);
+  if (prefs.view === "plots") {
+    liveGroup.draw();
+    if (roadDirty) {
+      roadDirty = false;
+      drawRoad($("road"), { columns, row: rows[rows.length - 1], meta, lanes: prefs.lanes,
+                            span: prefs.span, camera: prefs.camera, collisions });
     }
-    g.stroke();
+  } else if (prefs.view === "3d") {
+    updateReadouts();
+  } else if (prefs.view === "jobs") {
+    batchGroup.draw();
   }
-  g.setLineDash([]);
 }
+new ResizeObserver(() => { roadDirty = true; }).observe($("road"));
 
-function draw() {
-  requestAnimationFrame(draw);
-  if (!$("tab-live").classList.contains("active") || !rows.length || !columns.length) return;
-  const last = rows[rows.length - 1];
-  drawRoad(last);
-  const lanes = ["ice", "ev"].filter((p) => col(p + "_x") >= 0);
-  const colorOf = (p) => (p === "ice" ? COLORS.ice : COLORS.ev);
-  drawChart("ch-speed", [
-    { name: (lanes[0] || "ice") + "_lead_v", color: COLORS.lead, onlyIf: (lanes[0] || "ice") + "_lead_on" },
-    { name: (lanes[0] || "ice") + "_v_set", color: COLORS.lead, dash: true, width: 1 },
-    ...lanes.map((p) => ({ name: p + "_v", color: colorOf(p) })),
-  ]);
-  drawChart("ch-dist", [
-    ...lanes.map((p) => ({ name: p + "_d_ref", color: colorOf(p), dash: true, width: 1, onlyIf: p + "_target" })),
-    ...lanes.map((p) => ({ name: p + "_d", color: colorOf(p), onlyIf: p + "_lead_on" })),
-  ], 0);
-  drawChart("ch-acc", [
-    ...lanes.map((p) => ({ name: p + "_a_des", color: colorOf(p), dash: true, width: 1 })),
-    ...lanes.map((p) => ({ name: p + "_a", color: colorOf(p) })),
-  ], -1, 1);
-}
-
-// ------------------------------------------------------------------ start
-COLORS.ice = css("--ice"); COLORS.ev = css("--ev"); COLORS.lead = css("--lead");
-resizeCanvases();
+// ================================================================== start
+applyTheme();
+liveGroup.window = prefs.window;
+setSeg("seg-window", prefs.window === Infinity || prefs.window === null ? "Infinity" : prefs.window);
+if (prefs.window === null) { prefs.window = Infinity; liveGroup.window = Infinity; }   // JSON has no Infinity
+setSeg("seg-cols", prefs.cols);
+buildCharts();
+syncCamera();
+syncLanes();
+liveGroup.onViewChange();
+showView(prefs.view);
 safe(loadConfig);
 connect();
-draw();
+frame();

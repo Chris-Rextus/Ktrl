@@ -4,6 +4,11 @@
 //
 // step() advances one plant step dt. Every N = Ts_ctrl/dt steps the upper
 // controller runs first and its a_des is held (ZOH) until the next tick.
+//
+// Collision: the gap d = leader rear bumper - ego front bumper reaches 0.
+// With simulation.on_collision = stop_lane the lane freezes at that instant:
+// its time keeps running (so the output stays aligned with the other lane)
+// but the cars, the controller and every output value stay as they were.
 
 #include "leader.hpp"
 #include "params.hpp"
@@ -35,11 +40,16 @@ public:
         N_ = static_cast<long>(std::llround(p_.sim.Ts_ctrl / car_.dt()));
         a_des_ = 0.0;
         collided_ = false;
+        frozen_ = false;
+        t_frozen_ = 0.0;
+        t_collision_ = -1.0;
+        v_impact_ = 0.0;
         d_min_ = std::numeric_limits<double>::infinity();
         update_target();
     }
 
     void step() {
+        if (frozen_) { t_frozen_ += car_.dt(); ++n_; return; }
         const double t = car_.t();
 
         if (scn_.cut_in_now(t))                           // S6: leader appears
@@ -67,12 +77,17 @@ public:
         if (scn_.leader_on_lane(car_.t())) {
             const double dd = d();
             d_min_ = std::min(d_min_, dd);
-            if (dd <= 0.0) collided_ = true;
+            if (dd <= 0.0 && !collided_) {
+                collided_ = true;
+                t_collision_ = car_.t();
+                v_impact_ = car_.v() - lead_.v;           // closing speed at contact
+                if (p_.sim.stop_on_collision) { frozen_ = true; t_frozen_ = car_.t(); }
+            }
         }
     }
 
     // ---- accessors
-    double t() const                     { return car_.t(); }
+    double t() const                     { return frozen_ ? t_frozen_ : car_.t(); }
     const std::string& name() const      { return name_; }
     const Car& car() const               { return car_; }
     const Leader& leader() const         { return lead_; }
@@ -84,6 +99,9 @@ public:
     bool target() const                  { return target_; }
     bool leader_on_lane() const          { return scn_.leader_on_lane(car_.t()); }
     bool collided() const                { return collided_; }
+    bool frozen() const                  { return frozen_; }         // stopped after a collision
+    double t_collision() const           { return t_collision_; }    // -1 if none
+    double v_impact() const              { return v_impact_; }       // m/s closing speed at contact
     double d_min() const                 { return d_min_; }
     bool is_tick() const                 { return n_ % N_ == 0; }   // next step is a tick
 
@@ -109,6 +127,10 @@ private:
     double a_des_ = 0.0;
     bool   target_ = false;
     bool   collided_ = false;
+    bool   frozen_ = false;
+    double t_frozen_ = 0.0;
+    double t_collision_ = -1.0;
+    double v_impact_ = 0.0;
     double d_min_ = 0.0;
 };
 

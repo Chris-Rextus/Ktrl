@@ -1,68 +1,195 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ktrl - ACC simulator</title>
+<title>Ktrl · ACC simulator</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header>
-  <h1>Ktrl</h1>
-  <nav>
-    <button class="tab active" data-tab="live">Live</button>
-    <button class="tab" data-tab="params">Parameters</button>
-    <button class="tab" data-tab="jobs">Tests &amp; batch</button>
+<div class="app">
+
+<!-- ================================================================ top bar -->
+<header class="topbar">
+  <div class="brand"><span class="logo">K</span><div><b>Ktrl</b><small>ACC simulator</small></div></div>
+
+  <nav class="views-switch" id="nav-main">
+    <button data-view="3d" title="3D view (1)"><span class="ico">◳</span>3D view</button>
+    <button data-view="plots" title="Plots and road (2)"><span class="ico">∿</span>Plots</button>
   </nav>
-  <div id="conn" class="pill">connecting</div>
-  <div id="state" class="pill">-</div>
+  <nav class="views-sub" id="nav-sub">
+    <button data-view="params" title="All parameters (3)">Parameters</button>
+    <button data-view="jobs" title="Tests and batch (4)">Tests &amp; batch</button>
+  </nav>
+
+  <div class="spacer"></div>
+  <div class="run-status">
+    <span class="badge" id="st-state">idle</span>
+    <span class="mono" id="st-time">t = –</span>
+    <div class="progress"><i id="st-bar"></i></div>
+    <span class="muted mono" id="st-extra"></span>
+  </div>
+  <div class="conn" id="conn" title="Connection to the server"><i></i><span>connecting</span></div>
+  <button class="icon" id="btn-theme" title="Light / dark gray"><svg width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 2a6 6 0 0 1 0 12z" fill="currentColor"/></svg></button>
+  <button class="icon" id="btn-side" title="Show / hide live controls (C)"><svg width="16" height="16" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="9.5" y="3" width="4.5" height="10" fill="currentColor"/></svg></button>
 </header>
 
-<!-- ============================================================ LIVE -->
-<section id="tab-live" class="tab-page active">
-  <div class="live-grid">
-    <div class="views">
-      <canvas id="road" height="185"></canvas>
-      <div class="charts">
-        <div class="chart"><div class="chart-title">Speed [m/s]</div><canvas id="ch-speed" height="170"></canvas></div>
-        <div class="chart"><div class="chart-title">Distance to leader d and target d_ref [m]</div><canvas id="ch-dist" height="170"></canvas></div>
-        <div class="chart"><div class="chart-title">Acceleration a and a_des [m/s²]</div><canvas id="ch-acc" height="170"></canvas></div>
+<!-- ================================================================ run bar -->
+<div class="runbar">
+  <div class="btn-row">
+    <button id="btn-start" class="primary" title="Start in real time">▶ Start</button>
+    <button id="btn-fast" title="Run the whole scenario at full speed (not with Endless)">▸▸ Fast</button>
+    <button id="btn-pause" title="Pause / resume (Space)">❚❚ Pause</button>
+    <button id="btn-stop" title="Stop the simulator">■ Stop</button>
+    <button id="btn-restart" title="Restart from t = 0 with the saved parameters (R)">↻ Restart</button>
+  </div>
+  <div class="sep"></div>
+  <label class="inline">Scenario <select id="sel-preset"></select></label>
+  <span id="preset-desc" class="muted ellipsis"></span>
+  <div class="sep"></div>
+  <label class="switch" title="Run until Stop"><input type="checkbox" id="chk-endless"><i></i>Endless</label>
+  <label class="inline">Speed
+    <select id="sel-speed">
+      <option value="0.25">0.25×</option><option value="0.5">0.5×</option>
+      <option value="1">1× real time</option><option value="2">2×</option>
+      <option value="4">4×</option><option value="8">8×</option>
+    </select>
+  </label>
+</div>
+
+<!-- ================================================================ collision banner -->
+<div class="alert hidden" id="collision-banner">
+  <span class="alert-ico">⚠</span>
+  <div id="collision-text"></div>
+  <div class="spacer"></div>
+  <button class="small" id="btn-coll-restart">↻ Restart</button>
+  <button class="icon" id="btn-coll-hide" title="Hide for this run">✕</button>
+</div>
+
+<!-- ================================================================ workspace -->
+<main class="workspace" id="workspace">
+
+  <!-- ------------------------------------------------ 3D view (reserved) -->
+  <section class="view" id="view-3d">
+    <div class="stage3d">
+      <div class="stage3d-grid"></div>
+      <div class="stage3d-msg">
+        <div class="ico-big">◳</div>
+        <h2>3D view</h2>
+        <p>Reserved for the 3D street with the two cars. The live data stream it will use is already
+          running: the values below update with the simulation.</p>
       </div>
-      <div class="legend">
-        <span><i style="background:var(--ice)"></i>ICE</span>
-        <span><i style="background:var(--ev)"></i>EV</span>
-        <span><i style="background:var(--lead)"></i>leader / target</span>
-        <span><i class="dashed"></i>commanded (a_des, d_ref)</span>
+      <div class="readouts" id="readouts"></div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ plots + road -->
+  <section class="view" id="view-plots">
+    <div class="card road-card">
+      <div class="card-head">
+        <h3>Road</h3>
+        <div class="seg small" id="seg-camera">
+          <button data-value="follow" title="Fixed span, follows the car">Follow</button>
+          <button data-value="fit" title="Zoom to show the car and its leader">Fit</button>
+        </div>
+        <label class="inline small" id="span-box">Span
+          <input type="range" id="rng-span" min="60" max="500" step="10"><span class="mono" id="span-val"></span>
+        </label>
+        <div class="spacer"></div>
+        <span class="legend-dots">
+          <span><i style="background:var(--ice)"></i>ICE</span>
+          <span><i style="background:var(--ev)"></i>EV</span>
+          <span><i style="background:var(--lead-car)"></i>leader</span>
+          <span><i class="dash" style="border-color:var(--target)"></i>target distance</span>
+        </span>
       </div>
+      <canvas id="road"></canvas>
     </div>
 
-    <aside class="controls">
-      <div class="group">
-        <h2>Run</h2>
-        <div class="buttons">
-          <button id="btn-start" class="primary">Start</button>
-          <button id="btn-stop">Stop</button>
-          <button id="btn-restart">Restart</button>
-          <button id="btn-pause">Pause</button>
-        </div>
-        <label class="field">Scenario
-          <select id="sel-preset"></select>
-        </label>
-        <div id="preset-desc" class="hint"></div>
-        <label class="check"><input type="checkbox" id="chk-endless"> Endless (run until Stop)</label>
-        <label class="field">Playback speed
-          <select id="sel-speed">
-            <option value="0.25">0.25×</option><option value="0.5">0.5×</option>
-            <option value="1" selected>1× (real time)</option><option value="2">2×</option>
-            <option value="4">4×</option><option value="8">8×</option>
-          </select>
-        </label>
-        <div class="hint">Scenario and Endless take effect when you press Start or Restart.</div>
+    <div class="plots-toolbar">
+      <div class="seg small" id="seg-window" title="Visible time window">
+        <button data-value="10">10 s</button><button data-value="30">30 s</button>
+        <button data-value="60">60 s</button><button data-value="120">2 min</button>
+        <button data-value="300">5 min</button><button data-value="Infinity">All</button>
       </div>
+      <button class="small" id="btn-follow" title="Back to live (double-click a chart)">● Live</button>
+      <span class="muted small" id="zoom-hint">Drag on a chart to zoom · double-click to go back to live</span>
+      <div class="spacer"></div>
+      <div class="seg small" id="seg-cols" title="Charts per row">
+        <button data-value="1">▭</button><button data-value="2">▭▭</button><button data-value="3">▭▭▭</button>
+      </div>
+      <button class="small" id="btn-add-chart">＋ Chart</button>
+      <button class="small" id="btn-csv" title="Download the current run as CSV">CSV</button>
+      <button class="small ghost" id="btn-reset-layout" title="Default charts">Reset layout</button>
+    </div>
+    <div class="chart-grid" id="chart-grid"></div>
+  </section>
 
-      <div class="group">
-        <h2>Distance to the car ahead</h2>
-        <div class="seg" id="seg-spacing">
+  <!-- ------------------------------------------------ parameters -->
+  <section class="view" id="view-params">
+    <div class="params-toolbar">
+      <input type="search" id="params-search" placeholder="Search parameters…">
+      <span class="muted mono small" id="params-path"></span>
+      <div class="spacer"></div>
+      <span class="badge" id="params-dirty">no changes</span>
+      <button id="btn-discard" class="ghost">Discard</button>
+      <button id="btn-validate">Check</button>
+      <button id="btn-save">Save</button>
+      <button id="btn-save-restart" class="primary">Save &amp; restart</button>
+    </div>
+    <pre id="params-result" class="result hidden"></pre>
+    <div class="card" id="runtime-card">
+      <div class="card-head"><h3>Live overrides <small>[runtime]</small></h3>
+        <span class="muted small">Values set from the live controls. They win over the sections below while the run lasts.</span>
+        <div class="spacer"></div>
+        <button class="small" id="btn-clear-runtime">Clear all</button>
+      </div>
+      <div id="runtime-list" class="chips"></div>
+    </div>
+    <div id="params-form" class="params-grid"></div>
+  </section>
+
+  <!-- ------------------------------------------------ tests & batch -->
+  <section class="view" id="view-jobs">
+    <div class="jobs-grid">
+      <div class="jobs-left">
+        <div class="card">
+          <div class="card-head"><h3>Validation tests</h3></div>
+          <p class="muted">Compares the model with the numbers of the document (about 1 s).</p>
+          <button id="btn-tests" class="primary">Run all tests</button>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Batch</h3><span class="muted small">every scenario at full speed, both cars</span></div>
+          <div id="batch-presets" class="chips"></div>
+          <button id="btn-batch" class="primary">Run batch</button>
+        </div>
+        <div class="card grow">
+          <div class="card-head"><h3>Output</h3><div class="spacer"></div><span class="badge" id="job-badge">–</span></div>
+          <pre id="job-output" class="result">Results appear here.</pre>
+        </div>
+      </div>
+      <div class="jobs-right">
+        <div class="card">
+          <div class="card-head"><h3>Batch results</h3><div class="spacer"></div>
+            <button class="small" id="btn-batch-refresh">Refresh</button></div>
+          <pre id="batch-summary" class="result summary">No batch yet.</pre>
+          <div id="batch-files" class="chips"></div>
+        </div>
+        <div class="card grow">
+          <div class="card-head"><h3 id="batch-view-title">Batch run viewer</h3>
+            <span class="muted small" id="batch-view-hint">click a file above</span></div>
+          <div class="chart-grid cols-1" id="batch-charts"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ live controls -->
+  <aside class="side" id="side">
+    <div class="side-scroll">
+      <details class="acc" open data-acc="distance">
+        <summary>Distance to the car ahead</summary>
+        <div class="seg full" id="seg-spacing">
           <button data-value="fixed">Fixed distance</button>
           <button data-value="time_gap">Time gap</button>
         </div>
@@ -79,59 +206,70 @@
         </div>
         <div class="slider" data-key="lambda" data-min="0.1" data-max="1.5" data-step="0.05" data-unit="1/s"
              data-label="Distance gain λ"></div>
-      </div>
+      </details>
 
-      <div class="group">
-        <h2>Speed</h2>
+      <details class="acc" open data-acc="speed">
+        <summary>Speed</summary>
         <div class="slider" data-key="v_set" data-min="0" data-max="45" data-step="0.5" data-unit="m/s"
              data-label="Set speed" data-scenario="1"></div>
         <div class="slider" data-key="k_p" data-min="0.1" data-max="2" data-step="0.05" data-unit="1/s"
              data-label="Speed gain k_p"></div>
         <div class="slider" data-key="k_i" data-min="0" data-max="1" data-step="0.0125" data-unit="1/s²"
              data-label="Speed gain k_i"></div>
-      </div>
+      </details>
 
-      <div class="group">
-        <h2>Leader and road</h2>
+      <details class="acc" open data-acc="leader">
+        <summary>Leader and road</summary>
         <div class="slider" data-key="leader_accel" data-min="-5" data-max="2" data-step="0.1" data-unit="m/s²"
              data-label="Leader acceleration" data-scenario="1"></div>
         <div class="slider" data-key="grade" data-min="-10" data-max="10" data-step="0.5" data-unit="%"
              data-label="Road grade"></div>
-        <button id="btn-reset-live" class="small">Hand everything back to the scenario</button>
-      </div>
-    </aside>
-  </div>
-  <pre id="console" class="console"></pre>
-</section>
+      </details>
 
-<!-- ============================================================ PARAMETERS -->
-<section id="tab-params" class="tab-page">
-  <div class="params-bar">
-    <span id="params-path" class="hint"></span>
-    <span id="params-dirty" class="hint"></span>
-    <button id="btn-discard">Discard changes</button>
-    <button id="btn-validate">Check</button>
-    <button id="btn-save">Save</button>
-    <button id="btn-save-restart" class="primary">Save &amp; restart</button>
-  </div>
-  <pre id="params-result" class="result hidden"></pre>
-  <div id="params-form" class="params-form"></div>
-</section>
+      <details class="acc" open data-acc="display">
+        <summary>Display</summary>
+        <div class="row-lbl">Vehicles shown</div>
+        <div class="seg full" id="seg-lanes">
+          <button data-value="ice">ICE</button><button data-value="ev">EV</button>
+        </div>
+        <div class="hint">Which vehicles the simulator runs is set in Parameters → [simulation] vehicle.</div>
+      </details>
 
-<!-- ============================================================ JOBS -->
-<section id="tab-jobs" class="tab-page">
-  <div class="group">
-    <h2>Validation tests</h2>
-    <button id="btn-tests" class="primary">Run all tests</button>
-    <span class="hint">Compares the model with the numbers of the document (takes ~1 s).</span>
-  </div>
-  <div class="group">
-    <h2>Batch (all scenarios at full speed)</h2>
-    <div id="batch-presets" class="buttons"></div>
-    <button id="btn-batch" class="primary">Run batch</button>
-  </div>
-  <pre id="job-output" class="result">Results appear here.</pre>
-</section>
+      <button id="btn-reset-live" class="ghost full">↺ Hand everything back to the scenario</button>
+      <div class="hint center">Live changes apply within 0.1 s and are kept in [runtime].</div>
+    </div>
+  </aside>
+</main>
+
+<!-- ================================================================ status bar + console -->
+<footer class="statusbar">
+  <button class="small ghost" id="btn-console">▴ Console <span class="badge tiny hidden" id="console-new">0</span></button>
+  <span class="muted small" id="status-msg"></span>
+  <div class="spacer"></div>
+  <span class="muted small">Space pause · R restart · 1–4 views · C controls</span>
+</footer>
+<div class="console-drawer" id="console-drawer">
+  <div class="console-head"><b>Console</b><div class="spacer"></div>
+    <button class="small ghost" id="btn-console-clear">Clear</button>
+    <button class="small ghost" id="btn-console-close">▾</button></div>
+  <pre id="console"></pre>
+</div>
+</div>
+
+<!-- ================================================================ chart editor -->
+<dialog id="dlg-chart">
+  <form method="dialog" class="dlg">
+    <h3 id="dlg-title">Chart</h3>
+    <label class="field">Title <input id="dlg-name" required></label>
+    <label class="switch"><input type="checkbox" id="dlg-zero"><i></i>Start the y axis at 0</label>
+    <div class="muted small">Signals (each is drawn for every vehicle shown)</div>
+    <div id="dlg-sigs" class="sig-list"></div>
+    <div class="dlg-buttons">
+      <button value="cancel" class="ghost">Cancel</button>
+      <button value="ok" class="primary" id="dlg-ok">Apply</button>
+    </div>
+  </form>
+</dialog>
 
 <div id="toast"></div>
 <script type="module" src="app.js"></script>

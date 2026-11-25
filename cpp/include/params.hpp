@@ -25,6 +25,7 @@ struct SimParams {
     double realtime_factor;     // 0 = max speed
     std::string on_finish;      // exit | wait
     bool endless;               // run until stopped (duration forced to 0)
+    bool stop_on_collision;     // on_collision = stop_lane: a lane that collides freezes
 };
 
 struct OutputParams {

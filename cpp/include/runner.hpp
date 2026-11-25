@@ -6,6 +6,8 @@
 //   - writes a small status file atomically (tmp + rename);
 //   - watches the config file and applies its [runtime] section live
 //     (pause, stop, restart, set speed, gains, leader override, grade, speed).
+//   - collisions: a lane that collides can freeze (simulation.on_collision);
+//     the run ends when every lane has stopped.
 
 #include "ev_vehicle.hpp"
 #include "ice_vehicle.hpp"
@@ -45,6 +47,8 @@ private:
     void rebase_clock();
     double sim_t() const;
     bool finished() const;
+    bool all_stopped() const;         // every lane frozen by a collision
+    void report_collisions();         // console + status message, once per lane
 
     std::string cfg_path_;
     bool force_fast_;
@@ -68,6 +72,7 @@ private:
     clock::time_point last_poll_{};
     clock::time_point last_status_{};
     std::string last_msg_;
+    bool ice_reported_ = false, ev_reported_ = false;
 
     // pacing
     clock::time_point wall0_{};

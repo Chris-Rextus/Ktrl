@@ -250,12 +250,21 @@ async def run_info() -> dict[str, Any]:
 
 @app.post("/api/run/start")
 async def run_start(body: StartRequest = StartRequest()) -> dict[str, Any]:
+    if sim.running:
+        # A simulator is alive (running, paused, or waiting after the end or a
+        # collision with on_finish = wait). Real time: restart it in place.
+        # Fast: it needs a new process, so stop the old one first.
+        if not body.fast:
+            return await run_restart()
+        await sim.stop()
     async with config_lock:
-        # make sure a leftover 'pause = true' does not freeze the new run
+        # make sure a leftover 'pause = true' or 'stop = true' does not
+        # freeze or end the new run
         cfg = ConfigFile.load(CONFIG)
-        if cfg.get("runtime", "pause") == "true":
-            cfg.set("runtime", "pause", False)
-            cfg.save()
+        for key in ("pause", "stop"):
+            if cfg.get("runtime", key) == "true":
+                cfg.set("runtime", key, False)
+        cfg.save()
     tail.refresh_paths()
     info = await sim.start(fast=body.fast)
     tail.reset()
@@ -264,7 +273,18 @@ async def run_start(body: StartRequest = StartRequest()) -> dict[str, Any]:
 
 @app.post("/api/run/stop")
 async def run_stop() -> dict[str, Any]:
-    return (await sim.stop()).to_dict()
+    if sim.running:
+        return (await sim.stop()).to_dict()
+    # Not started by this server (e.g. launched from a terminal): ask it to
+    # stop through the config file. Every vehicle_sim reading this config
+    # stops within 0.1 s. The next Start resets the flag.
+    async with config_lock:
+        cfg = ConfigFile.load(CONFIG)
+        cfg.update({"runtime": {"stop": True}})
+        cfg.save()
+    return {**sim.live.to_dict(),
+            "message": "no simulator started by this server; runtime.stop = true written "
+                       "so any other vehicle_sim using this config stops"}
 
 
 @app.post("/api/run/restart")

@@ -51,6 +51,26 @@ bool Runner::finished() const {
     return p_.sim.duration > 0.0 && sim_t() >= p_.sim.duration - 1e-9;
 }
 
+
+bool Runner::all_stopped() const {
+    return (ice_ || ev_) && (!ice_ || ice_->frozen()) && (!ev_ || ev_->frozen());
+}
+
+void Runner::report_collisions() {
+    auto one = [&](const auto& L, bool& reported, const char* name) {
+        if (!L || reported || !L->collided()) return;
+        reported = true;
+        char buf[160];
+        std::snprintf(buf, sizeof buf, "%s collided at t = %.2f s, closing speed %.2f m/s%s",
+                      name, L->t_collision(), L->v_impact(),
+                      L->frozen() ? " - lane stopped" : "");
+        std::cerr << "COLLISION: " << buf << "\n";
+        write_status("running", std::string("collision: ") + buf);
+    };
+    one(ice_, ice_reported_, "ICE");
+    one(ev_, ev_reported_, "EV");
+}
+
 // ------------------------------------------------------------------ (re)start
 void Runner::start_run() {
     const Config cfg = Config::load(cfg_path_);
@@ -90,6 +110,7 @@ void Runner::start_run() {
         rt_factor_ = 1.0;
     }
     runtime_seen_.clear();
+    ice_reported_ = ev_reported_ = false;
     apply_runtime(cfg, /*first=*/true);
     cfg_mtime_ = std::filesystem::last_write_time(cfg_path_);
 
@@ -133,10 +154,13 @@ int Runner::run() {
             continue;
         }
 
-        if (finished()) {
-            if (p_.sim.on_finish == "exit") { write_status("done", "duration reached"); break; }
+        if (finished() || all_stopped()) {
+            const bool coll = all_stopped();
+            const std::string why = coll ? "every lane stopped after a collision" : "duration reached";
+            if (p_.sim.on_finish == "exit") { write_status(coll ? "collision" : "done", why); break; }
             if (secs(clock::now() - last_status_) >= STATUS_PERIOD_S)
-                write_status("waiting", "duration reached; change runtime.restart_id or set stop");
+                write_status(coll ? "collision" : "waiting",
+                             why + "; change runtime.restart_id or set stop");
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
             continue;
         }
@@ -150,6 +174,7 @@ int Runner::run() {
 
         advance_one_period();
         write_line();
+        report_collisions();
 
         // pacing
         if (rt_factor_ > 0.0) {
@@ -225,6 +250,8 @@ void Runner::write_status(const std::string& state, const std::string& msg) {
           << "lag = " << lag_ << "\n"
           << "lines = " << lines_ << "\n"
           << "output = " << p_.out.file << "\n"
+          << "collided =" << (ice_ && ice_->collided() ? " ice" : "")
+                          << (ev_ && ev_->collided() ? " ev" : "") << "\n"
           << "message = " << (last_msg_.empty() ? "-" : last_msg_) << "\n";
     }
     std::error_code ec;

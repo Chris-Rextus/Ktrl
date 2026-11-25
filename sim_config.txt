@@ -14,6 +14,7 @@ integrator      = rk4       # rk4 | euler
 realtime_factor = 1.0       # 1 = wall clock, 2 = 2x faster, 0 = as fast as possible
 on_finish       = exit      # exit | wait (wait = stay alive for a restart from the viewer)
 endless         = false     # true = run until stopped (ignores duration and the preset duration)
+on_collision    = stop_lane # stop_lane | continue (stop_lane: the lane that collides freezes; the run ends when all have)
 
 [output]
 file            = sim_output.txt
@@ -124,15 +125,15 @@ target_lost_time   = -1     # s     S4, <0 = disabled
 [runtime]
 pause           = false
 stop            = false     # set to true while running to end the process
-restart_id      = 0         # change the number to restart with the whole file re-read
+restart_id      = 9         # change the number to restart with the whole file re-read
 # realtime_factor = 1.0     # 0 = as fast as possible
 v_set         = 45.0      # driver set speed override [m/s] (or: scenario)
 # leader_accel  = 0.0       # leader acceleration override [m/s2] (or: scenario)
 # h             = 1.8       # controller gains, applied live
 # lambda        = 0.4
 # d0            = 5.0
-d_set         = 17.0      # fixed target distance [m] (spacing = fixed)
-# spacing       = time_gap  # time_gap | fixed
+d_set         = 7.0       # fixed target distance [m] (spacing = fixed)
+spacing       = fixed     # time_gap | fixed
 # k_p           = 0.75
 # k_i           = 0.1875
 # beta          = 0.0       # road grade [rad], disturbance
