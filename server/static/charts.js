@@ -236,7 +236,6 @@ export class ChartPanel {
     g.restore();
     g.setLineDash([]);
 
-    // crosshair
     // event markers (collisions)
     for (const m of this.group.markers) {
       if (m.t < t0 || m.t > t1) continue;

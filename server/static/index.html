@@ -16,10 +16,12 @@
   <nav class="views-switch" id="nav-main">
     <button data-view="3d" title="3D view (1)"><span class="ico">◳</span>3D view</button>
     <button data-view="plots" title="Plots and road (2)"><span class="ico">∿</span>Plots</button>
+    <button data-view="diagrams" title="Block diagrams for the presentation (3)"><span class="ico">⧉</span>Diagrams</button>
   </nav>
   <nav class="views-sub" id="nav-sub">
-    <button data-view="params" title="All parameters (3)">Parameters</button>
-    <button data-view="jobs" title="Tests and batch (4)">Tests &amp; batch</button>
+    <button data-view="analysis" title="Deep analysis (4)">Analysis</button>
+    <button data-view="params" title="All parameters (5)">Parameters</button>
+    <button data-view="jobs" title="Tests and batch (6)">Tests &amp; batch</button>
   </nav>
 
   <div class="spacer"></div>
@@ -69,19 +71,8 @@
 <!-- ================================================================ workspace -->
 <main class="workspace" id="workspace">
 
-  <!-- ------------------------------------------------ 3D view (reserved) -->
-  <section class="view" id="view-3d">
-    <div class="stage3d">
-      <div class="stage3d-grid"></div>
-      <div class="stage3d-msg">
-        <div class="ico-big">◳</div>
-        <h2>3D view</h2>
-        <p>Reserved for the 3D street with the two cars. The live data stream it will use is already
-          running: the values below update with the simulation.</p>
-      </div>
-      <div class="readouts" id="readouts"></div>
-    </div>
-  </section>
+  <!-- ------------------------------------------------ 3D view (built by view3d.js) -->
+  <section class="view" id="view-3d"></section>
 
   <!-- ------------------------------------------------ plots + road -->
   <section class="view" id="view-plots">
@@ -123,6 +114,53 @@
       <button class="small ghost" id="btn-reset-layout" title="Default charts">Reset layout</button>
     </div>
     <div class="chart-grid" id="chart-grid"></div>
+  </section>
+
+  <!-- ------------------------------------------------ diagrams (presentation) -->
+  <section class="view" id="view-diagrams">
+    <div class="dg-stage" id="dg-stage">
+      <div class="dg-bar">
+        <nav id="dg-nav" class="dg-nav"></nav>
+        <div class="spacer"></div>
+        <div class="seg small" id="dg-car" title="Plant shown in the diagrams">
+          <button data-value="ev">EV</button><button data-value="ice">ICE</button></div>
+        <label class="inline small">Operating point <select id="dg-op"></select></label>
+        <button class="small" id="dg-present" title="Full screen (F)">⛶ Present</button>
+      </div>
+      <div class="dg-head">
+        <div><h1 id="dg-title"></h1><p id="dg-sub"></p></div>
+        <span class="badge" id="dg-live"></span>
+      </div>
+      <div class="dg-svg-host" id="dg-svg"></div>
+      <div class="dg-info" id="dg-info"></div>
+      <div class="dg-foot">
+        <button id="dg-prev">‹ Previous</button><span class="mono" id="dg-count"></span><button id="dg-next">Next ›</button>
+        <span class="muted small">Design, transfer functions and numbers: txt §11 and the PI / distance syntheses ·
+          live signals from the running simulation · ← → to navigate · F full screen</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ analysis -->
+  <section class="view" id="view-analysis">
+    <div class="an-grid">
+      <nav class="an-nav" id="an-nav"></nav>
+      <div class="an-main">
+        <div class="card an-head">
+          <div><h2 id="an-title"></h2><p id="an-desc" class="muted"></p></div>
+          <form id="an-form" class="an-form" onsubmit="return false"></form>
+          <div class="an-actions">
+            <label class="switch" title="Apply the live slider values ([runtime]) on top of the saved parameters">
+              <input type="checkbox" id="an-runtime"><i></i>Include live overrides</label>
+            <span class="muted small" id="an-status"></span>
+            <div class="spacer"></div>
+            <button id="an-json" class="small ghost" title="Download the raw results">⤓ JSON</button>
+            <button id="an-run" class="primary">▶ Run analysis</button>
+          </div>
+        </div>
+        <div id="an-results" class="an-results"></div>
+      </div>
+    </div>
   </section>
 
   <!-- ------------------------------------------------ parameters -->
@@ -246,7 +284,7 @@
   <button class="small ghost" id="btn-console">▴ Console <span class="badge tiny hidden" id="console-new">0</span></button>
   <span class="muted small" id="status-msg"></span>
   <div class="spacer"></div>
-  <span class="muted small">Space pause · R restart · 1–4 views · C controls</span>
+  <span class="muted small">Space pause · R restart · 1–6 views · C controls</span>
 </footer>
 <div class="console-drawer" id="console-drawer">
   <div class="console-head"><b>Console</b><div class="spacer"></div>

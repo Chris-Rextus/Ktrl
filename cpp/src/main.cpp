@@ -3,6 +3,7 @@
 #include "params.hpp"
 #include "runner.hpp"
 #include "tests.hpp"
+#include "analysis.hpp"
 
 #include <boost/version.hpp>
 
@@ -24,7 +25,9 @@ static void usage(const char* exe) {
               << "  --test-ice   ICE trim / step / AEB validation runs (§6.2, §6.4)\n"
               << "  --test-ev    EV trim / step / AEB / energy validation runs (§6.2-§6.6)\n"
               << "  --test-loop  closed loop: T0 overshoot, S2 following, S3 leader braking\n"
-              << "  --test-all   all tests\n";
+              << "  --test-all   all tests\n"
+              << "  --analyze K [key=value ...]  deep analysis K = plant | steps | bode |\n"
+              << "               min_gap | sweep, JSON on stdout (see analysis.hpp)\n";
 }
 
 static void on_signal(int) { vs::Runner::request_stop(); }
@@ -34,6 +37,8 @@ int main(int argc, char** argv) {
     bool selftest = false, test_ice = false, test_ev = false, test_loop = false;
     bool fast = false, print = false, batch = false;
     std::vector<std::string> batch_list;
+    std::string analyze;                 // analysis kind
+    vs::Args analyze_args;               // key=value arguments
 
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
@@ -50,12 +55,33 @@ int main(int argc, char** argv) {
                    (argv[i + 1][0] == 'S' || argv[i + 1][0] == 'T') && std::strlen(argv[i + 1]) == 2)
                 batch_list.push_back(argv[++i]);
         }
+        else if (!std::strcmp(a, "--analyze")) {
+            if (i + 1 >= argc) { usage(argv[0]); return 2; }
+            analyze = argv[++i];
+        }
+        else if (!analyze.empty() && std::strchr(a, '=')) {
+            const std::string kv = a;
+            const auto eq = kv.find('=');
+            analyze_args[kv.substr(0, eq)] = kv.substr(eq + 1);
+        }
         else if (!std::strcmp(a, "--help"))      { usage(argv[0]); return 0; }
         else if (a[0] == '-')                    { usage(argv[0]); return 2; }
         else                                     cfg_path = a;
     }
 
     const bool testing = selftest || test_ice || test_ev || test_loop;
+
+
+    if (!analyze.empty()) {
+        try {
+            const Config cfg = Config::load(cfg_path);
+            const vs::Params p = vs::Params::from_config(cfg);
+            return vs::run_analysis(p, analyze, analyze_args, std::cout);
+        } catch (const std::exception& e) {
+            std::cout << "{\"error\":\"" << e.what() << "\"}\n";
+            return 1;
+        }
+    }
 
     if (batch) {
         try {

@@ -8,6 +8,19 @@ import { DEFAULT_CHARTS, GROUP_ORDER, LANES, LANE_NAME, SIGNALS, sigInfo, signal
 
 const $ = (id) => document.getElementById(id);
 
+// The Analysis and Diagrams pages are loaded separately (loadPage below), so a
+// missing or broken file only disables its own page instead of the whole viewer.
+let redrawAll = () => {}, redrawDiagrams = () => {}, diagramsTick = () => {}, view3dTick = () => {};
+async function loadPage(file, init) {
+  try {
+    init(await import(file));
+  } catch (e) {
+    console.error(e);
+    toast(`${file} could not be loaded (${e.message}). Check that it is in server/static/.`, true);
+    log(`[viewer] ${file} could not be loaded: ${e.message}`);
+  }
+}
+
 // ================================================================== preferences
 // Display preferences only (theme, layout, charts). Kept in this browser; the
 // simulation parameters live in sim_config.txt.
@@ -78,6 +91,8 @@ function applyTheme() {
   liveGroup.dirty = true;
   batchGroup.dirty = true;
   roadDirty = true;
+  redrawAll();
+  redrawDiagrams();
   for (const m of liveGroup.markers) m.color = getComputedStyle(document.documentElement).getPropertyValue("--bad").trim();
 }
 $("btn-theme").addEventListener("click", () => {
@@ -88,7 +103,7 @@ $("btn-theme").addEventListener("click", () => {
 // ================================================================== views
 // 3d / plots are the two main windows (with the live controls at the side);
 // params / jobs are full-width pages.
-const VIEWS = ["3d", "plots", "params", "jobs"];
+const VIEWS = ["3d", "plots", "diagrams", "analysis", "params", "jobs"];
 function showView(v) {
   if (!VIEWS.includes(v)) v = "plots";
   prefs.view = v; savePrefs();
@@ -97,6 +112,8 @@ function showView(v) {
   $("workspace").classList.toggle("with-side", prefs.side && (v === "3d" || v === "plots"));
   if (v === "plots") liveGroup.dirty = true;
   if (v === "jobs") { batchGroup.dirty = true; loadBatchList(); }
+  if (v === "analysis") requestAnimationFrame(redrawAll);
+  if (v === "diagrams") requestAnimationFrame(() => { redrawDiagrams(); diagramsTick(true); });
   roadDirty = true;
 }
 document.querySelectorAll("[data-view]").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
@@ -110,7 +127,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === " ") { e.preventDefault(); togglePause(); }
   else if (e.key === "r" || e.key === "R") safe(() => POST("/api/run/restart"));
   else if (e.key === "c" || e.key === "C") $("btn-side").click();
-  else if (e.key >= "1" && e.key <= "4") showView(VIEWS[+e.key - 1]);
+  else if (e.key >= "1" && e.key <= "6") showView(VIEWS[+e.key - 1]);
   else if (e.key === "`") toggleConsole();
 });
 
@@ -554,6 +571,7 @@ const READOUT = [
 ];
 function renderReadoutsFrame() {
   const box = $("readouts");
+  if (!box) return;                      // the 3D view replaced the readouts
   const lanes = prefs.lanes.filter((l) => columns.includes(l + "_v"));
   box.innerHTML = lanes.map((l) => `
     <div class="readout" data-lane="${l}">
@@ -858,9 +876,11 @@ function frame() {
                             span: prefs.span, camera: prefs.camera, collisions });
     }
   } else if (prefs.view === "3d") {
-    updateReadouts();
+    view3dTick();
   } else if (prefs.view === "jobs") {
     batchGroup.draw();
+  } else if (prefs.view === "diagrams") {
+    diagramsTick();
   }
 }
 new ResizeObserver(() => { roadDirty = true; }).observe($("road"));
@@ -877,5 +897,15 @@ syncLanes();
 liveGroup.onViewChange();
 showView(prefs.view);
 safe(loadConfig);
+loadPage("./analysis.js", (m) => { redrawAll = m.redrawAll; m.initAnalysis({ POST, toast, cfgVal }); });
+loadPage("./view3d.js", (m) => {
+  view3dTick = m.tick;
+  m.init3D({ getLive: () => ({ columns, rows, meta, status }), POST, PUT, toast, safe, cfgVal,
+             reload: loadConfig, getCollisions: () => collisions });
+});
+loadPage("./diagrams.js", (m) => {
+  redrawDiagrams = m.redrawDiagrams; diagramsTick = m.tick;
+  m.initDiagrams({ getLive: () => ({ columns, rows, meta, status }) });
+});
 connect();
 frame();

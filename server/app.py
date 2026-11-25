@@ -337,6 +337,50 @@ async def get_batch_file(name: str) -> dict[str, Any]:
         raise HTTPException(404, f"{name} not found - run a batch first")
     return parse_output_file(path)
 
+# ------------------------------------------------------------------ analysis
+ANALYSES = ("plant", "steps", "bode", "min_gap", "sweep")
+# [runtime] keys that map onto saved sections (live overrides)
+RUNTIME_TO_SECTION = {"k_p": "controller", "k_i": "controller", "h": "controller",
+                      "lambda": "controller", "d0": "controller", "d_set": "controller",
+                      "spacing": "controller", "beta": "environment"}
+
+
+class AnalysisRequest(BaseModel):
+    kind: str
+    args: dict[str, Any] = {}
+    use_runtime: bool = False               # apply the live overrides of [runtime]
+    changes: dict[str, dict[str, Any]] = {}  # extra config changes (not saved)
+
+
+@app.post("/api/analysis")
+async def run_analysis(body: AnalysisRequest) -> dict[str, Any]:
+    if body.kind not in ANALYSES:
+        raise HTTPException(400, f"unknown analysis '{body.kind}' ({', '.join(ANALYSES)})")
+    args: dict[str, str] = {}
+    for k, v in body.args.items():
+        sv = str(v)
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", k) or not re.fullmatch(r"[A-Za-z0-9_.+\-]*", sv):
+            raise HTTPException(400, f"bad argument {k}={sv!r}")
+        args[k] = sv
+    changes = {s: dict(kv) for s, kv in body.changes.items()}
+    if body.use_runtime:
+        rt = ConfigFile.load(CONFIG).to_dict().get("runtime", {})
+        for k, entry in rt.items():
+            sec = RUNTIME_TO_SECTION.get(k)
+            if sec and entry.get("value") not in (None, "", "scenario"):
+                changes.setdefault(sec, {})[k] = entry["value"]
+    res = await sim.analyze(body.kind, args, changes)
+    line = next((ln for ln in reversed(res.output.splitlines()) if ln.startswith("{")), "")
+    try:
+        data = json.loads(line)
+    except json.JSONDecodeError:
+        raise HTTPException(500, f"analysis output not understood:\n{res.output[-2000:]}")
+    if "error" in data:
+        raise HTTPException(422, data["error"])
+    data["applied_changes"] = changes
+    data["wall_seconds"] = res.seconds
+    return data
+
 
 # ------------------------------------------------------------------ WebSocket
 @app.websocket("/ws")

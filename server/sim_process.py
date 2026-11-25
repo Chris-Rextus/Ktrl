@@ -168,6 +168,24 @@ class SimManager:
             with contextlib.suppress(FileNotFoundError):
                 tmp.unlink()
 
+    async def analyze(self, kind: str, args: dict[str, Any],
+                      changes: dict[str, dict[str, Any]] | None = None) -> JobResult:
+        """Run `vehicle_sim <tmp config> --analyze <kind> key=value ...` on a
+        temporary copy of the config with `changes` applied."""
+        cfg = ConfigFile.load(CONFIG)
+        try:
+            cfg.update(changes or {})
+        except ValueError as e:
+            return JobResult(["analyze"], 1, f'{{"error": "{e}"}}\n', 0.0)
+        tmp = ROOT / f".tmp_analysis_{os.getpid()}_{time.monotonic_ns()}.txt"
+        cfg.save(tmp)
+        try:
+            argv = [str(tmp), "--analyze", kind] + [f"{k}={v}" for k, v in args.items()]
+            return await self.run_job(argv, timeout=900)
+        finally:
+            with contextlib.suppress(FileNotFoundError):
+                tmp.unlink()
+
     # ================================================================ shutdown
     async def shutdown(self) -> None:
         await self.stop()

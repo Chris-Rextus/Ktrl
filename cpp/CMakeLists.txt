@@ -10,6 +10,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 find_package(Boost 1.70 REQUIRED CONFIG)
+find_package(Threads REQUIRED)
 
 add_executable(vehicle_sim
   src/main.cpp
@@ -21,9 +22,11 @@ add_executable(vehicle_sim
   src/upper_controller.cpp
   src/runner.cpp
   src/batch.cpp
+  src/analysis.cpp
   src/tests.cpp
 )
 
 target_include_directories(vehicle_sim PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(vehicle_sim PRIVATE Boost::headers)
 target_compile_options(vehicle_sim PRIVATE -Wall -Wextra -Wpedantic)
+target_link_libraries(vehicle_sim PRIVATE Boost::headers Threads::Threads)
