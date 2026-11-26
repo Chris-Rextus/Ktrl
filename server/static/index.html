@@ -7,11 +7,14 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<!-- covers the page until the intro (intro.js) draws; removes itself after 6 s whatever happens -->
+<div id="intro-cover" style="position:fixed;inset:0;z-index:9999;background:#05070b;animation:cover-off 0s 6s forwards"></div>
+<style>@keyframes cover-off { to { visibility: hidden; } }</style>
 <div class="app">
 
 <!-- ================================================================ top bar -->
 <header class="topbar">
-  <div class="brand"><span class="logo">K</span><div><b>Ktrl</b><small>ACC simulator</small></div></div>
+  <div class="brand"><span class="logo" id="brand-logo">K</span><div><b>Ktrl</b><small>ACC simulator</small></div></div>
 
   <nav class="views-switch" id="nav-main">
     <button data-view="physics" title="Physics and models of the plants (7)"><span class="ico">⚛</span>Physics</button>
@@ -287,7 +290,7 @@
   <button class="small ghost" id="btn-console">▴ Console <span class="badge tiny hidden" id="console-new">0</span></button>
   <span class="muted small" id="status-msg"></span>
   <div class="spacer"></div>
-  <span class="muted small">Space pause · R restart · 1–6 views · C controls</span>
+  <span class="muted small">Space pause · R restart · 1–7 views · C controls</span>
 </footer>
 <div class="console-drawer" id="console-drawer">
   <div class="console-head"><b>Console</b><div class="spacer"></div>

@@ -868,6 +868,7 @@ async function openBatchFile(name) {
 // ================================================================== render loop
 function frame() {
   requestAnimationFrame(frame);
+  if (introHold) return;                 // the intro covers the screen
   if (prefs.view === "plots") {
     liveGroup.draw();
     if (roadDirty) {
@@ -887,6 +888,14 @@ function frame() {
 }
 new ResizeObserver(() => { roadDirty = true; }).observe($("road"));
 
+// ================================================================== intro
+// Title screen (intro.js) at every start; its Start button opens the Physics tab.
+// Add ?nointro to the address to skip it. Clicking the top-bar logo replays it.
+// While it covers the screen the pages are not drawn.
+const NO_INTRO = /[?&]nointro\b/.test(location.search) || location.hash === "#nointro";
+let introHold = !NO_INTRO;
+function introDone() { introHold = false; $("intro-cover")?.remove(); }
+
 // ================================================================== start
 applyTheme();
 liveGroup.window = prefs.window;
@@ -897,8 +906,16 @@ buildCharts();
 syncCamera();
 syncLanes();
 liveGroup.onViewChange();
-showView(prefs.view);
+showView(NO_INTRO ? prefs.view : "physics");
 safe(loadConfig);
+loadPage("./intro.js", (m) => {
+  const play = () => {
+    introHold = true;
+    m.playIntro({ logo: $("brand-logo"), onReveal: () => { introHold = false; showView("physics"); }, onDone: introDone });
+  };
+  m.mountLogo($("brand-logo"), play);
+  if (NO_INTRO) introDone(); else play();
+}).then(() => { if (!document.getElementById("intro")) introDone(); });
 loadPage("./analysis.js", (m) => { redrawAll = m.redrawAll; m.initAnalysis({ POST, toast, cfgVal }); });
 loadPage("./view3d.js", (m) => {
   view3dTick = m.tick;
