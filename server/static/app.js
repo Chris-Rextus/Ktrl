@@ -10,7 +10,7 @@ const $ = (id) => document.getElementById(id);
 
 // The Analysis and Diagrams pages are loaded separately (loadPage below), so a
 // missing or broken file only disables its own page instead of the whole viewer.
-let redrawAll = () => {}, redrawDiagrams = () => {}, diagramsTick = () => {}, view3dTick = () => {};
+let redrawAll = () => {}, redrawDiagrams = () => {}, diagramsTick = () => {}, view3dTick = () => {}, physicsTick = () => {};
 async function loadPage(file, init) {
   try {
     init(await import(file));
@@ -103,7 +103,7 @@ $("btn-theme").addEventListener("click", () => {
 // ================================================================== views
 // 3d / plots are the two main windows (with the live controls at the side);
 // params / jobs are full-width pages.
-const VIEWS = ["3d", "plots", "diagrams", "analysis", "params", "jobs"];
+const VIEWS = ["3d", "plots", "diagrams", "analysis", "params", "jobs", "physics"];
 function showView(v) {
   if (!VIEWS.includes(v)) v = "plots";
   prefs.view = v; savePrefs();
@@ -127,7 +127,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === " ") { e.preventDefault(); togglePause(); }
   else if (e.key === "r" || e.key === "R") safe(() => POST("/api/run/restart"));
   else if (e.key === "c" || e.key === "C") $("btn-side").click();
-  else if (e.key >= "1" && e.key <= "6") showView(VIEWS[+e.key - 1]);
+  else if (e.key >= "1" && e.key <= "7") showView(VIEWS[+e.key - 1]);
   else if (e.key === "`") toggleConsole();
 });
 
@@ -881,6 +881,8 @@ function frame() {
     batchGroup.draw();
   } else if (prefs.view === "diagrams") {
     diagramsTick();
+  } else if (prefs.view === "physics") {
+    physicsTick();
   }
 }
 new ResizeObserver(() => { roadDirty = true; }).observe($("road"));
@@ -903,6 +905,7 @@ loadPage("./view3d.js", (m) => {
   m.init3D({ getLive: () => ({ columns, rows, meta, status }), POST, PUT, toast, safe, cfgVal,
              reload: loadConfig, getCollisions: () => collisions });
 });
+loadPage("./physics.js", (m) => { physicsTick = m.tick; m.initPhysics({ toast }); });
 loadPage("./diagrams.js", (m) => {
   redrawDiagrams = m.redrawDiagrams; diagramsTick = m.tick;
   m.initDiagrams({ getLive: () => ({ columns, rows, meta, status }) });

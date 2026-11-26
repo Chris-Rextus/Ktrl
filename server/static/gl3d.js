@@ -550,6 +550,13 @@ void main(){
     spec = mix(0.08, 0.9, uWet); shine = mix(16.0, 180.0, uWet); refl = 0.4;
     kEm += base * uNight * 0.06;          // retroreflective beads
   }
+  else if (uKind == 10) {                 // studio floor: grid (spacing uRefl), fades out radially
+    vec2 gp = vPos.xz / uRefl;
+    vec2 gd = abs(fract(gp - 0.5) - 0.5) / max(fwidth(gp), vec2(1e-4));
+    float line = 1.0 - min(min(gd.x, gd.y), 1.0);
+    base *= 1.0 - 0.22 * line;
+    spec = 0.06; shine = 16.0; refl = 0.1;
+  }
   if ((uFlags & 1) != 0 && uSnow > 0.0)   // snow settles on upward faces
     base = mix(base, vec3(0.86, 0.89, 0.94), smoothstep(0.45, 0.85, N.y) * uSnow * (0.75 + 0.25 * vnoise(wp * 1.3)));
 
@@ -598,6 +605,7 @@ void main(){
   col = applyFog(col, vPos, uCam);
   float alpha = uAlpha * vExtra.x;
   if ((uFlags & 2) != 0) alpha = mix(uAlpha, 1.0, clamp(fres * 2.2, 0.0, 1.0));     // glass
+  if (uKind == 10) alpha *= 1.0 - smoothstep(0.22, 0.5, length(vLocal.xz));
   if (uKind == 1 && uMirror > 0.5) alpha = 1.0 - wetK * 0.62 * (0.35 + 0.65 * pow(1.0 - NdV, 1.5));
   o = vec4(outCol(col), alpha);
 }`;

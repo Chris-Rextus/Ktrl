@@ -125,14 +125,14 @@ target_lost_time   = -1     # s     S4, <0 = disabled
 [runtime]
 pause           = false
 stop            = false     # set to true while running to end the process
-restart_id      = 9         # change the number to restart with the whole file re-read
+restart_id      = 12        # change the number to restart with the whole file re-read
 # realtime_factor = 1.0     # 0 = as fast as possible
 v_set         = 45.0      # driver set speed override [m/s] (or: scenario)
 # leader_accel  = 0.0       # leader acceleration override [m/s2] (or: scenario)
 # h             = 1.8       # controller gains, applied live
 # lambda        = 0.4
 # d0            = 5.0
-d_set         = 7.0       # fixed target distance [m] (spacing = fixed)
+d_set         = 11.0      # fixed target distance [m] (spacing = fixed)
 spacing       = fixed     # time_gap | fixed
 # k_p           = 0.75
 # k_i           = 0.1875
