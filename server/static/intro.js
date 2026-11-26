@@ -12,6 +12,11 @@
 //   playIntro({ logo, onReveal, onDone })  show the intro; onReveal when the app
 //                                          starts to show, onDone when it is gone
 //   mountLogo(el, onClick)                 put the Lorenz logo in the top bar (+ favicon)
+//
+// Behind the logo runs the highway of the 3D view (menubg3d.js, own WebGL
+// context): live traffic, fast clock and weather. The logo canvas lays a dark
+// scrim over it for contrast. If the 3D backdrop cannot start, the former
+// procedural backdrop (sky, stars, road grid) is drawn instead.
 
 // ================================================================== Lorenz system
 const SIG = 10, RHO = 28, BETA = 8 / 3, ZC = 24;   // world: X = x, Y = z − 24, Z = −y
@@ -80,7 +85,9 @@ const CSS = `
   user-select: none; -webkit-user-select: none; --mx: 0; --my: 0; }
 #intro.gl-on { background: transparent; }
 #intro.leaving { pointer-events: none; }
-#intro canvas.igl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#intro canvas.igl, #intro canvas.ibg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#intro canvas.ibg { opacity: 0; transition: opacity 1.2s ease; }
+#intro canvas.ibg.on { opacity: 1; }
 #intro .iui { position: absolute; inset: 0; pointer-events: none; }
 #intro .mono { font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace; }
 
@@ -103,6 +110,9 @@ const CSS = `
   animation: i-fade 1.2s ease both 2s; }
 @keyframes i-fade { from { opacity: 0; transform: translateY(8px); filter: blur(6px); } }
 @keyframes i-grow { from { opacity: 0; transform: scaleX(.2); } }
+
+#intro .ititle, #intro .ihint, #intro .ihud, #intro .iboot, #intro .ifoot { text-shadow: 0 1px 3px rgba(0,0,0,.85), 0 0 12px rgba(0,0,0,.5); }
+#intro h1 span { text-shadow: 0 0 18px color-mix(in srgb, var(--c) 65%, transparent), 0 0 52px color-mix(in srgb, var(--c) 35%, transparent), 0 2px 6px rgba(0,0,0,.7); }
 
 /* ---- start button */
 #intro .istart { position: absolute; left: 50%; top: 83%; transform: translate(-50%, -50%);
@@ -260,6 +270,7 @@ function markup(sound) {
     `<div class="bl mono" style="--i:${i}"><span class="bk">›</span><span class="bn">${n}</span><span class="bd">${d}</span>` +
     `<span class="bs${k === "srv" ? " wait" : ""}" data-k="${k}">${k === "srv" ? "· · ·" : "OK"}</span></div>`).join("");
   return `
+  <canvas class="ibg"></canvas>
   <canvas class="igl"></canvas>
   <div class="iui">
     <div class="ihud">
@@ -430,7 +441,7 @@ in vec2 vUv;
 out vec4 o;
 uniform sampler2D uScene, uBloom;
 uniform vec2 uRes, uMouse, uCenter;
-uniform float uTime, uRingR, uRingA, uIrisGlow, uFade, uGlowA, uEnergy, uBloomK, uHz, uScroll, uDpr;
+uniform float uTime, uRingR, uRingA, uIrisGlow, uFade, uGlowA, uEnergy, uBloomK, uHz, uScroll, uDpr, uWorld;
 uniform vec3 uIris;
 float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 float vn(vec2 p) {
@@ -446,6 +457,35 @@ vec3 stars(vec2 p, float dens, float sz) {
   float tw = 0.6 + 0.4 * sin(uTime * (0.8 + 2.5 * h21(id + 1.3)) + h * 60.0);
   float b = smoothstep(sz, 0.0, d) * tw * smoothstep(0.92, 1.0, h);
   return mix(vec3(0.70, 0.80, 1.0), vec3(1.0, 0.86, 0.72), h21(id + 9.1)) * b * 1.6;
+}
+// HUD arcs left and right of the attractor
+float arcs(vec2 fc) {
+  vec2 rc = fc - uCenter;
+  float r = length(rc), ca = abs(rc.x) / max(r, 1e-3), ang = atan(rc.y, rc.x);
+  float side = smoothstep(0.80, 0.86, ca);
+  float arc1 = exp(-pow((r - uRingR) / (1.1 * uDpr), 2.0)) * side;
+  float arc2 = exp(-pow((r - uRingR * 1.05) / (0.9 * uDpr), 2.0)) * smoothstep(0.90, 0.93, ca);
+  float tk = step(fract(ang / 6.28318 * 90.0), 0.16) * step(abs(r - uRingR * 1.1), 5.0 * uDpr) * smoothstep(0.84, 0.88, ca);
+  float run = step(0.8, fract(ang / 6.28318 * 3.0 + uTime * 0.05)) * exp(-pow((r - uRingR * 0.95) / (1.2 * uDpr), 2.0)) * side;
+  return (arc1 * 0.16 + arc2 * 0.10 + tk * 0.12 + run * 0.22) * uRingA;
+}
+// darkening over the live 3D backdrop: keeps the logo, the title and the text readable
+float scrim(vec2 fc) {
+  vec2 uv = fc / uRes;
+  vec2 p = (fc - 0.5 * uRes) / uRes.y;
+  vec2 vq = (uv - 0.5) * vec2(1.0, 1.15);
+  float s = 0.1 + 0.55 * dot(vq, vq);
+  s += 0.3 * smoothstep(0.42, 0.0, uv.y);                        // bottom: button, boot log
+  s += 0.16 * smoothstep(0.75, 1.0, uv.y);                       // top: HUD
+  vec2 hc = (fc - uCenter) / uRes.y;
+  s += 0.16 * exp(-dot(hc * vec2(0.75, 1.0), hc * vec2(0.75, 1.0)) * 8.0);  // behind the logo
+  float band = exp(-pow((uv.y - 0.27) / 0.12, 2.0)) * exp(-pow(p.x / 0.62, 2.0));
+  s += 0.34 * band;                                              // behind title, tagline and button
+  float ar = uRes.x / uRes.y;
+  s += 0.32 * exp(-pow(uv.x * ar / 0.75, 2.0) - pow(uv.y / 0.3, 2.0));          // boot log
+  s += 0.26 * exp(-pow(uv.x * ar / 0.6, 2.0) - pow((1.0 - uv.y) / 0.3, 2.0));   // Lorenz HUD
+  s += 0.2 * exp(-pow((1.0 - uv.x) * ar / 0.45, 2.0) - pow(uv.y / 0.14, 2.0));  // footer
+  return clamp(s, 0.0, 0.88);
 }
 vec3 bg(vec2 fc) {
   vec2 uv = fc / uRes;
@@ -479,14 +519,7 @@ vec3 bg(vec2 fc) {
   }
   float hd = abs(uv.y - uHz);
   col += vec3(0.20, 0.38, 0.85) * (exp(-hd * 300.0) * 0.28 + exp(-hd * 24.0) * 0.06);
-  vec2 rc = fc - uCenter;
-  float r = length(rc), ca = abs(rc.x) / max(r, 1e-3), ang = atan(rc.y, rc.x);
-  float side = smoothstep(0.80, 0.86, ca);
-  float arc1 = exp(-pow((r - uRingR) / (1.1 * uDpr), 2.0)) * side;
-  float arc2 = exp(-pow((r - uRingR * 1.05) / (0.9 * uDpr), 2.0)) * smoothstep(0.90, 0.93, ca);
-  float tk = step(fract(ang / 6.28318 * 90.0), 0.16) * step(abs(r - uRingR * 1.1), 5.0 * uDpr) * smoothstep(0.84, 0.88, ca);
-  float run = step(0.8, fract(ang / 6.28318 * 3.0 + uTime * 0.05)) * exp(-pow((r - uRingR * 0.95) / (1.2 * uDpr), 2.0)) * side;
-  col += vec3(0.36, 0.58, 1.0) * (arc1 * 0.16 + arc2 * 0.10 + tk * 0.12 + run * 0.22) * uRingA;
+  col += vec3(0.36, 0.58, 1.0) * arcs(fc);
   vec2 vq = (uv - 0.5) * vec2(1.0, 1.15);
   col *= 1.0 - 0.75 * dot(vq, vq);
   return col;
@@ -495,7 +528,13 @@ void main() {
   vec2 fc = gl_FragCoord.xy;
   vec3 g = texture(uScene, vUv).rgb + texture(uBloom, vUv).rgb * uBloomK;
   g = (1.0 - exp(-g * 1.1)) * uGlowA;
-  vec3 b = max(bg(fc) * uFade + (h21(fc + fract(uTime * 7.0) * 91.0) - 0.5) * (2.5 / 255.0), 0.0);
+  float nz = (h21(fc + fract(uTime * 7.0) * 91.0) - 0.5) * (2.5 / 255.0);
+  // backdrop, premultiplied: procedural (opaque) crossfading to the scrim over the 3D world
+  vec3 bP = uWorld < 0.999 ? max(bg(fc) * uFade + nz, 0.0) : vec3(0.0);
+  float sA = mix(1.0, scrim(fc), uFade);
+  vec3 rgbP = mix(bP, vec3(0.012, 0.016, 0.028) * sA + nz * sA, uWorld);
+  float aP = mix(1.0, sA, uWorld);
+  g += vec3(0.36, 0.58, 1.0) * arcs(fc) * 1.6 * uWorld * uGlowA;
   float A = 1.0;
   if (uIris.z > 0.0) {
     float r = length(fc - uIris.xy);
@@ -506,7 +545,8 @@ void main() {
   }
   g = clamp(g, 0.0, 1.0);
   float ga = max(g.r, max(g.g, g.b));
-  o = vec4(b * A + g, A + ga * (1.0 - A));
+  rgbP = max(rgbP, 0.0) * A; aP *= A;
+  o = vec4(rgbP + g, aP + ga * (1.0 - aP));
 }`;
 
 function createGL(canvas, D, K, TN, MAXS) {
@@ -690,6 +730,7 @@ function createGL(canvas, D, K, TN, MAXS) {
     gl.uniform3f(c.uIris, s.iris[0], s.iris[1], s.iris[2]); gl.uniform1f(c.uIrisGlow, s.irisGlow);
     gl.uniform1f(c.uFade, s.fade); gl.uniform1f(c.uGlowA, s.glowA); gl.uniform1f(c.uEnergy, s.energy);
     gl.uniform1f(c.uBloomK, s.bloomK); gl.uniform1f(c.uHz, s.hz); gl.uniform1f(c.uScroll, s.scroll); gl.uniform1f(c.uDpr, s.dpr);
+    gl.uniform1f(c.uWorld, s.world || 0);
     gl.bindVertexArray(vTri);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
@@ -792,7 +833,7 @@ export function playIntro(opt = {}) {
   root.innerHTML = markup(prefs.sound);
   document.body.appendChild(root);
   const q = (s) => root.querySelector(s);
-  const canvas = q("canvas"), btn = q(".ibtn");
+  const canvas = q("canvas.igl"), bgCanvas = q("canvas.ibg"), btn = q(".ibtn");
   const logo = opt.logo || null;
   logo?.classList.add("intro-hide");
 
@@ -923,6 +964,7 @@ export function playIntro(opt = {}) {
     window.removeEventListener("keydown", onKey, true);
     window.removeEventListener("resize", resize);
     G.destroy();
+    BG?.destroy(); BG = null;
     root.remove();
     active = false;
     opt.onDone?.();
@@ -994,6 +1036,24 @@ export function playIntro(opt = {}) {
     }
   }
 
+  // ---------------------------------------------------------------- 3D backdrop
+  // Loaded after the first frame (building the world takes a moment); the
+  // procedural backdrop shows until it is ready, then crossfades.
+  let BG = null, bgOn = 0, bgFailed = false;
+  setTimeout(() => {
+    if (!active || window.__introNoWorld) return;
+    import("./menubg3d.js").then((m) => {
+      if (!active) return;
+      BG = new m.Backdrop(bgCanvas);
+      BG.frame(0, { mouse: [0, 0] });
+      bgCanvas.classList.add("on");
+    }).catch((e) => { bgFailed = true; BG = null; console.warn("[intro] 3D backdrop unavailable:", e); });
+  }, 40);
+  function irisMask(r) {                              // the iris also opens the 3D backdrop
+    const m = r > 0 ? `radial-gradient(circle at ${(irisC[0] / dpr).toFixed(1)}px ${((H - irisC[1]) / dpr).toFixed(1)}px, transparent ${(r / dpr).toFixed(1)}px, #000 ${(r / dpr + 1.5).toFixed(1)}px)` : "";
+    bgCanvas.style.webkitMaskImage = m; bgCanvas.style.maskImage = m;
+  }
+
   // ---------------------------------------------------------------- frame
   const st = { orthoS: [0, 0], X: [0, 0, 0, 0], mouse: ms, center: [0, 0], iris: [0, 0, -1],
                trail: G.trailData, heads: G.headData, sparks: G.sparkData };
@@ -1056,6 +1116,12 @@ export function playIntro(opt = {}) {
     st.iris[0] = irisC[0]; st.iris[1] = irisC[1]; st.iris[2] = ir > 0 ? ir : -1;
     st.irisGlow = leaving ? 1.3 * (1 - sstep(0.85, 1.3, TL)) : 0;
 
+    if (BG && !bgFailed) {
+      try { BG.frame(dtR, { mouse: ms, T: window.__introBgT }); bgOn = Math.min(1, bgOn + dtR / 1.2); }
+      catch (e) { bgFailed = true; console.warn("[intro] 3D backdrop stopped:", e); BG.destroy(); BG = null; bgCanvas.classList.remove("on"); }
+    } else bgOn = Math.max(0, bgOn - dtR / 0.6);
+    st.world = sstep(0, 1, bgOn);
+    if (leaving) irisMask(ir);
     G.render(st);
     window.__introTL = leaving ? TL : -T;
     if (first) {                                   // the canvas now covers the screen
