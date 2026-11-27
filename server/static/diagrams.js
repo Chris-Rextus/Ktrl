@@ -202,6 +202,7 @@ let form = "full";            // mesh 2: "full" (as built) or "reduced" (§11.6 
 let slide = 0;
 let lastLive = 0;
 let timeline = null;
+let hlMode = "auto";          // overview: highlighted system ("auto" = live switch, "1", "2")
 let plantOpen = false;        // mesh tabs: the plant block opened into its physical sub-blocks
 let plantScroll = false;
 let tfShown = "";             // transfer-function slide: "car:v0" currently drawn
@@ -256,7 +257,7 @@ function cls(ids, name, on) { for (const id of ids) document.getElementById(id)?
 
 // ============================================================================ slides
 const SLIDES = [
-  { key: "overview", tab: "Overview", title: "The switched ACC: two meshes", sub: "One speed controller C_v, two ways of building its error. The switch picks the mesh from the distance." },
+  { key: "overview", tab: "Overview", title: "The switched ACC: two meshes", sub: "Two complete closed loops on the same car: system 1 (speed) and system 2 (distance). The switch picks which one drives C_v." },
   { key: "mesh1", tab: "Mesh 1 · speed", title: "Mesh 1 · speed control", sub: "Système 1 (§11.4): the speed PID (PI M1 + filtered D) alone, unit feedback on v_ego." },
   { key: "mesh2", tab: "Mesh 2 · distance", forms: true, title: "Mesh 2 · distance control in cascade (architecture B)", sub: "§11.6: the distance controller C_d is piped into the speed controller; the speed set-point is built from v_lead.",
     subReduced: "§11.6 reduced: v_ref and v_ego merge into the radar's relative speed Δv, so one junction builds the composite error ε for a single PID." },
@@ -269,87 +270,107 @@ const SLIDES = [
 
 // --------------------------------------------------------------------------- 1) overview
 function overview() {
-  const P = PLANT[car];
-  const s = new Svg(1600, 780);
-  s.region("rg1", 20, 40, 740, 180, "MESH 1 · SPEED");
-  s.region("rg2", 20, 262, 740, 236, "MESH 2 · DISTANCE (cascade B)");
-  // mesh 1
+  const P = PLANT[car], pname = P.name.split(" · ")[0];
+  const s = new Svg(1600, 790);
+  const ids = { 1: [], 2: [] };
+  const W = (k, id, pts, opt) => { s.wire(id, pts, opt); ids[k].push(id); };
+  const B = (k, id, ...a) => { s.block(id, ...a); ids[k].push(id); };
+  const S = (k, id, ...a) => { s.sum(id, ...a); ids[k].push(id); };
+  // the actuator + plant chain, drawn once per loop: C_v -> ZOH -> trim/sat -> plant
+  const chain = (k, x, y) => {
+    B(k, `o${k}-cv`, x + 103, y, 206, 120, "C_v(z) · PID", CV_BODY);
+    W(k, `o${k}-du`, [[x + 206, y], [x + 252, y]], { label: [x + 229, y - 18, "Δu"] });
+    B(k, `o${k}-zoh`, x + 295, y, 86, 80, "", ["ZOH"]);
+    W(k, `o${k}-uz`, [[x + 338, y], [x + 372, y]]);
+    B(k, `o${k}-trim`, x + 457, y, 170, 100, "trim + sat", [`${P.u0} + Δu`, P.sat]);
+    W(k, `o${k}-u`, [[x + 542, y], [x + 598, y]], { label: [x + 570, y - 18, P.u] });
+    B(k, `o${k}-g`, x + 681, y, 166, 130, pname,
+      { num: "N", den: "s^2 + D s + E", after: P.delay ? "G_v(s) · e^{−0.06 s}" : "G_v(s)" });
+    s.badge(`o${k}-b-u`, x + 457, y + 82);
+    return x + 764;                                         // right edge of the plant
+  };
+
+  // ---------------------------------------------------------------- loop 1: speed
+  s.add('<g id="o1-all" class="dg-loop">');
+  s.region("o1-rg", 20, 30, 1560, 250, "MESH 1 · SPEED  (system 1)");
   s.io(80, 140, "v_{set}");
-  s.wire("w-vset", [[92, 140], [128, 140]]);
-  s.sum("s1", 150, 140, { left: "+", bottom: "−" });
-  s.wire("w-ev", [[172, 140], [712, 140]]);
-  s.label(440, 120, "e_v = v_{set} − v_{ego}");
-  s.badge("b-ev", 440, 172);
-  // mesh 2
-  s.io(80, 380, "d_{ref}");
-  s.wire("w-dref", [[92, 380], [208, 380]]);
-  s.sum("s2", 230, 380, { left: "+", bottom: "−" });
-  s.wire("w-ed", [[252, 380], [302, 380]], { label: [277, 362, "e_d"] });
-  s.block("b-cd", 370, 380, 132, 96, "C_d", ["−K_d"]);
-  s.wire("w-vcorr", [[436, 380], [528, 380]], { label: [482, 362, "v_{corr}"] });
-  s.sum("s3", 550, 380, { left: "+", bottom: "+" });
-  s.wire("w-eps", [[572, 380], [712, 380]], { label: [640, 362, "ε"] });
-  s.badge("b-ed", 290, 418); s.badge("b-vcorr", 482, 418); s.badge("b-eps", 640, 418);
-  // switch
-  s.dot(720, 140, "pole"); s.dot(720, 380, "pole");
-  s.label(728, 120, "1", "start", "dg-pole"); s.label(732, 410, "2", "start", "dg-pole");
-  s.add(`<line class="dg-lever" id="lever" x1="806" y1="260" x2="726" y2="146"/>`);
-  s.dot(806, 260, "pivot");
-  s.add(`<g class="dg-switchnote"><rect x="680" y="455" width="250" height="62" rx="10"/>
-    <text x="805" y="481" text-anchor="middle">${m("target ∧ d ≤ d_{ref}  → 2")}</text>
-    <text x="805" y="505" text-anchor="middle">${m("otherwise  → 1")}</text></g>`);
-  s.wire("w-cin", [[812, 260], [856, 260]]);
-  // shared path
-  s.block("b-cv", 960, 260, 206, 120, "C_v(z) · PID", CV_BODY);
-  s.wire("w-u", [[1063, 260], [1095, 260]], { label: [1079, 242, "Δu"] });
-  s.block("b-zoh", 1140, 260, 86, 80, "", ["ZOH"]);
-  s.wire("w-uz", [[1183, 260], [1213, 260]]);
-  s.block("b-trim", 1300, 260, 170, 100, "trim + sat", [`${P.u0} + Δu`, P.sat]);
-  s.wire("w-up", [[1385, 260], [1405, 260]]);
-  s.block("b-plant", 1490, 260, 166, 130, P.name.split(" · ")[0],
-    { num: "N", den: "s^2 + D s + E", after: P.delay ? "G_v(s) · e^{−0.06 s}" : "G_v(s)" });
-  s.badge("b-u", 1300, 345);
-  s.wire("w-vout", [[1573, 260], [1592, 260]], { arrow: false });
-  // feedbacks
-  s.dot(1585, 260);
-  s.wire("w-fb1", [[1585, 260], [1585, 580], [150, 580], [150, 162]], { cls: "fb" });
-  s.label(900, 570, "v_{ego}");
-  s.badge("b-v", 1060, 606);
-  s.wire("w-fbr", [[1585, 580], [1585, 660], [1252, 660]], { cls: "fb" });
-  s.io(1372, 702, "v_{lead} (radar)", "start");
-  s.wire("w-vl", [[1360, 710], [1252, 710]]);
-  s.badge("b-vl", 1462, 746);
-  s.block("b-dyn", 1110, 685, 280, 110, "distance dynamics", ["Δv = v_{lead} − v_{ego}", "d = ∫ Δv dt"]);
-  s.wire("w-dv", [[970, 660], [550, 660], [550, 402]], { cls: "fb" });
-  s.label(760, 648, "Δv");
-  s.badge("b-dv", 760, 690);
-  s.wire("w-d", [[970, 712], [230, 712], [230, 402]], { cls: "fb" });
-  s.label(420, 700, "d");
-  s.badge("b-d", 420, 742);
+  W(1, "o1-in", [[92, 140], [138, 140]]);
+  S(1, "o1-s", 160, 140, { left: "+", bottom: "−" });
+  W(1, "o1-e", [[182, 140], [290, 140]], { label: [236, 122, "e_v"] });
+  s.badge("o1-b-e", 236, 178);
+  const r1 = chain(1, 292, 140);
+  W(1, "o1-v", [[r1, 140], [1190, 140]], { label: [1150, 122, "v_{ego}"] });
+  s.dot(1110, 140);
+  W(1, "o1-fb", [[1110, 140], [1110, 250], [160, 250], [160, 162]], { cls: "fb" });
+  s.label(420, 240, "v_{ego} (unit feedback)", "middle", "dg-small");
+  s.badge("o1-b-v", 1150, 178);
+  s.role(1150, 88, "CONTROLLED · v_{ego}", "cv");
+  s.add("</g>");
+
+  // ---------------------------------------------------------------- loop 2: distance (cascade B, reduced)
+  s.add('<g id="o2-all" class="dg-loop">');
+  s.region("o2-rg", 20, 310, 1560, 460, "MESH 2 · DISTANCE, cascade B  (system 2)");
+  s.io(80, 420, "d_{ref}");
+  W(2, "o2-in", [[92, 420], [138, 420]]);
+  S(2, "o2-s1", 160, 420, { left: "+", bottom: "−" });
+  W(2, "o2-ed", [[182, 420], [232, 420]], { label: [207, 402, "e_d"] });
+  B(2, "o2-cd", 290, 420, 114, 90, "C_d", ["−K_d"]);
+  W(2, "o2-vc", [[347, 420], [418, 420]], { label: [382, 402, "v_{corr}"] });
+  S(2, "o2-s2", 440, 420, { left: "+", bottom: "+" });
+  W(2, "o2-eps", [[462, 420], [528, 420]], { label: [495, 402, "ε"] });
+  s.badge("o2-b-ed", 207, 458); s.badge("o2-b-vc", 382, 458); s.badge("o2-b-eps", 495, 494);
+  const r2 = chain(2, 530, 420);
+  W(2, "o2-v", [[r2, 420], [1540, 420], [1540, 600], [1442, 600]], { label: [1490, 402, "v_{ego}"] });
+  s.badge("o2-b-v", 1490, 458);
+  B(2, "o2-dyn", 1300, 600, 280, 104, "radar · distance dynamics", ["Δv = v_{lead} − v_{ego}", "d = ∫ Δv dt"]);
+  s.io(1300, 724, "v_{lead}", "middle");
+  W(2, "o2-vl", [[1300, 708], [1300, 654]]);
+  s.badge("o2-b-vl", 1360, 718, "start");
+  W(2, "o2-dv", [[1160, 578], [440, 578], [440, 442]], { cls: "fb" });
+  s.label(800, 566, "Δv = v_{lead} − v_{ego} [m/s]");
+  s.badge("o2-b-dv", 800, 600);
+  W(2, "o2-d", [[1160, 628], [160, 628], [160, 442]], { cls: "fb" });
+  s.label(640, 652, "d [m] (radar)");
+  s.badge("o2-b-d", 640, 684);
+  s.role(1300, 528, "CONTROLLED · d", "cv");
+  s.add("</g>");
+
+  // which loop drives the car
+  s.add(`<g class="dg-switchnote"><rect x="1220" y="166" width="340" height="88" rx="10"/>
+    <text x="1390" y="190" text-anchor="middle">${m("one car, one active system:")}</text>
+    <text x="1390" y="214" text-anchor="middle">${m("target ∧ d ≤ d_{ref} → system 2")}</text>
+    <text x="1390" y="238" text-anchor="middle">${m("otherwise → system 1")}</text></g>`);
+  s.badge("o-b-act", 1556, 56, "end");
   return {
     svg: s.html(),
     info: `<div class="dg-eq">
-      <div><b>Mesh 1</b> ε = v_set − v_ego</div>
-      <div><b>Mesh 2</b> ε = (v_lead − v_ego) − K_d·(d_ref − d) &nbsp;·&nbsp; K_d = ${KD} s⁻¹</div>
-      <div><b>Both (PID)</b> Δu[k] = Δu<sub>PI</sub>[k] + D[k]: &nbsp;Δu<sub>PI</sub>[k] = Δu<sub>PI</sub>[k−1] + q₀·ε[k] − q₁·ε[k−1], &nbsp;D[k] = p<sub>f</sub>·D[k−1] + k<sub>f</sub>·(ε[k] − ε[k−1]),&nbsp; u = u₀ + Δu, saturated</div></div>`,
+      <div><b>System 1</b> ε = v_set − v_ego</div>
+      <div><b>System 2</b> ε = (v_lead − v_ego) − K_d·(d_ref − d) &nbsp;·&nbsp; K_d = ${KD} s⁻¹</div>
+      <div><b>Both (PID)</b> Δu[k] = Δu<sub>PI</sub>[k] + D[k]: &nbsp;Δu<sub>PI</sub>[k] = Δu<sub>PI</sub>[k−1] + q₀·ε[k] − q₁·ε[k−1], &nbsp;D[k] = p<sub>f</sub>·D[k−1] + k<sub>f</sub>·(ε[k] − ε[k−1]),&nbsp; u = u₀ + Δu, saturated</div>
+      <div><b>Note</b> both loops are drawn complete, but they share one physical car: the plant and the PID shown twice are the same blocks; the switch only changes which error ε enters C_v.</div></div>`,
     live(st) {
-      const m2 = st?.mesh === 2;
-      cls(["rg2", "s2", "s3", "b-cd", "w-dref", "w-ed", "w-vcorr", "w-eps", "w-dv", "w-d"], "on", !!st && m2);
-      cls(["rg1", "s1", "w-vset", "w-ev", "w-fb1"], "on", !!st && !m2);
-      cls(["rg2", "s2", "s3", "b-cd", "w-dref", "w-ed", "w-vcorr", "w-eps"], "dim", !!st && !m2);
-      cls(["rg1", "s1", "w-vset", "w-ev"], "dim", !!st && m2);
-      cls(["w-cin", "b-cv", "w-u", "b-zoh", "w-uz", "b-trim", "w-up", "b-plant", "w-fbr", "w-vl", "b-dyn"], "on", !!st);
-      const lever = $("lever");
-      if (lever) lever.setAttribute("x2", m2 ? 726 : 726), lever.setAttribute("y2", m2 ? 374 : 146);
-      setBadge("b-ev", val(st?.ev, "m/s"), !!st);
-      setBadge("b-ed", val(st?.ed, "m", 1), !!st);
-      setBadge("b-vcorr", val(st?.vcorr, "m/s"), !!st);
-      setBadge("b-eps", val(m2 ? st?.eps : st?.dv != null && st?.vcorr != null ? st.dv + st.vcorr : null, "m/s"), !!st);
-      setBadge("b-u", st ? `${P.u.replace(/[_{}]/g, "")} = ${st.u.toFixed(car === "ev" ? 1 : 3)} ${P.unit}` : "", !!st);
-      setBadge("b-v", val(st?.v, "m/s"), !!st);
-      setBadge("b-vl", val(st?.leadOn ? st.vl : null, "m/s"), !!st);
-      setBadge("b-dv", val(st?.dv, "m/s"), !!st);
-      setBadge("b-d", val(st?.leadOn ? st.d : null, "m", 1), !!st);
+      // highlighted system: manual choice, or the one the switch selects on the live data
+      const hl = hlMode === "1" ? 1 : hlMode === "2" ? 2 : st ? st.mesh : 0;
+      for (const k of [1, 2]) {
+        cls(ids[k], "on", hl === k);
+        $(`o${k}-rg`)?.classList.toggle("on", hl === k);
+        $(`o${k}-all`)?.classList.toggle("dim", hl !== 0 && hl !== k);
+      }
+      setBadge("o-b-act", hlMode === "auto"
+        ? (st ? `live: system ${st.mesh} active (${st.mesh === 1 ? "speed" : "distance"})` : "auto: no live data")
+        : `highlighted manually: system ${hlMode}${st ? ` · live: system ${st.mesh}` : ""}`, true);
+      const uTxt = st ? `${P.u.replace(/[_{}]/g, "")} = ${st.u.toFixed(car === "ev" ? 1 : 3)} ${P.unit}` : "";
+      setBadge("o1-b-e", val(st?.ev, "m/s"), !!st);
+      setBadge("o1-b-u", uTxt, !!st);
+      setBadge("o1-b-v", val(st?.v, "m/s"), !!st);
+      setBadge("o2-b-ed", val(st?.ed, "m", 1), !!st);
+      setBadge("o2-b-vc", val(st?.vcorr, "m/s"), !!st);
+      setBadge("o2-b-eps", val(st?.dv != null && st?.vcorr != null ? st.dv + st.vcorr : null, "m/s"), !!st);
+      setBadge("o2-b-u", uTxt, !!st);
+      setBadge("o2-b-v", val(st?.v, "m/s"), !!st);
+      setBadge("o2-b-vl", val(st?.leadOn ? st.vl : null, "m/s"), !!st);
+      setBadge("o2-b-dv", val(st?.dv, "m/s"), !!st);
+      setBadge("o2-b-d", val(st?.leadOn ? st.d : null, "m", 1), !!st);
     },
   };
 }
@@ -1454,7 +1475,7 @@ export function initDiagrams(a) {
   api = a;
   try {
     const st = JSON.parse(localStorage.getItem("ktrl.diagrams") || "{}");
-    slide = st.slide ?? 0; car = st.car ?? "ev"; opMode = st.op ?? "auto"; form = st.form ?? "full"; plantOpen = !!st.plant;
+    slide = st.slide ?? 0; car = st.car ?? "ev"; opMode = st.op ?? "auto"; form = st.form ?? "full"; plantOpen = !!st.plant; hlMode = st.hl ?? "auto";
     if (!(slide >= 0 && slide < SLIDES.length)) slide = 0;
   } catch { /* */ }
   // Full / Reduced switch (created here, shown on the slides that have two forms)
@@ -1464,6 +1485,14 @@ export function initDiagrams(a) {
   fm.title = "Diagram form (Mesh 2): as built, or reduced as in §11.6";
   fm.innerHTML = '<button data-value="full">Full</button><button data-value="reduced">Reduced</button>';
   $("dg-car").before(fm);
+  // Overview: highlight system 1 / 2 by hand, or follow the live switch
+  const hlSeg = document.createElement("div");
+  hlSeg.className = "seg small";
+  hlSeg.id = "dg-hl";
+  hlSeg.title = "Overview: highlight a system by hand, or follow the live switch (H)";
+  hlSeg.innerHTML = '<button data-value="auto">Auto</button><button data-value="1">System 1</button><button data-value="2">System 2</button>';
+  $("dg-car").before(hlSeg);
+  hlSeg.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { hlMode = b.dataset.value; save(); render(); }));
   fm.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { form = b.dataset.value; save(); render(); }));
   const nav = $("dg-nav");
   SLIDES.forEach((s, i) => {
@@ -1504,11 +1533,14 @@ export function initDiagrams(a) {
     if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); go(slide - 1); }
     if (e.key === "f" || e.key === "F") $("dg-present").click();
     if ((e.key === "v" || e.key === "V") && SLIDES[slide].forms) { form = form === "full" ? "reduced" : "full"; save(); render(); }
+    if ((e.key === "h" || e.key === "H") && SLIDES[slide].key === "overview") {
+      hlMode = { auto: "1", 1: "2", 2: "auto" }[hlMode]; save(); render();
+    }
     if ((e.key === "p" || e.key === "P") && /^mesh/.test(SLIDES[slide].key)) { plantOpen = !plantOpen; plantScroll = plantOpen; save(); render(); }
   });
   render();
 }
-function save() { try { localStorage.setItem("ktrl.diagrams", JSON.stringify({ slide, car, op: opMode, form, plant: plantOpen })); } catch { /* */ } }
+function save() { try { localStorage.setItem("ktrl.diagrams", JSON.stringify({ slide, car, op: opMode, form, plant: plantOpen, hl: hlMode })); } catch { /* */ } }
 function go(i) { slide = (i + SLIDES.length) % SLIDES.length; save(); render(); }
 
 function render() {
@@ -1523,6 +1555,8 @@ function render() {
     POINTS[car].map((p, i) => `<option value="${i}">v₀ = ${p.v0} m/s</option>`).join("");
   op.value = opMode;
   $("dg-form").style.display = S.forms ? "" : "none";
+  $("dg-hl").style.display = S.key === "overview" ? "" : "none";
+  document.querySelectorAll("#dg-hl button").forEach((b) => b.classList.toggle("on", b.dataset.value === hlMode));
   document.querySelectorAll("#dg-form button").forEach((b) => b.classList.toggle("on", b.dataset.value === form));
   $("dg-title").innerHTML = mh(S.forms && form === "reduced" ? S.title.replace("(architecture B)", "(architecture B, reduced)") : S.title);
   $("dg-sub").innerHTML = mh(S.forms && form === "reduced" ? S.subReduced : S.sub);

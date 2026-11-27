@@ -593,3 +593,7 @@ dialog::backdrop { background: rgba(0,0,0,.45); }
 .tf-legend .g { color: var(--muted); }
 .tf-legend .b { color: var(--bad); }
 @media (max-width: 1250px) { .tf-row { grid-template-columns: 1fr; } .tf-zp { max-width: 640px; } }
+
+/* overview: the system that is not highlighted fades */
+.dg-loop { transition: opacity .3s; }
+.dg-loop.dim { opacity: .3; }
