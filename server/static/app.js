@@ -256,6 +256,7 @@ function syncLiveControls() {
   sliders.lambda.set(+ctrl("lambda", 0.4));
   sliders.k_p.set(+ctrl("k_p", 0.75));
   sliders.k_i.set(+ctrl("k_i", 0.1875));
+  sliders.k_d.set(+ctrl("k_d", 0));
   const beta = +(rt("beta") ?? cfgVal("environment", "beta", 0));
   sliders.grade.set(+(Math.tan(beta) * 100).toFixed(1));
 
@@ -304,7 +305,7 @@ $("btn-reset-live").addEventListener("click", () => safe(async () => {
   await PUT("/api/runtime", {
     v_set: "scenario", leader_accel: "scenario",
     d_set: c("d_set"), h: c("h"), d0: c("d0"), lambda: c("lambda"),
-    k_p: c("k_p"), k_i: c("k_i"), spacing: cfgVal("controller", "spacing", "time_gap"),
+    k_p: c("k_p"), k_i: c("k_i"), k_d: +cfgVal("controller", "k_d", 0), spacing: cfgVal("controller", "spacing", "time_gap"),
     beta: +cfgVal("environment", "beta", 0),
   });
   await loadConfig();
@@ -636,7 +637,7 @@ function buildParamsForm() {
 }
 
 // keys the live controls may override ([runtime] key -> [section] key)
-const OVERRIDES = { controller: ["k_p", "k_i", "h", "lambda", "d0", "d_set", "spacing"],
+const OVERRIDES = { controller: ["k_p", "k_i", "k_d", "h", "lambda", "d0", "d_set", "spacing"],
                     environment: ["beta"], scenario: ["v_set"], simulation: ["realtime_factor"] };
 
 function paramRow(sec, key, f) {
@@ -925,7 +926,7 @@ loadPage("./view3d.js", (m) => {
 loadPage("./physics.js", (m) => { physicsTick = m.tick; m.initPhysics({ toast }); });
 loadPage("./diagrams.js", (m) => {
   redrawDiagrams = m.redrawDiagrams; diagramsTick = m.tick;
-  m.initDiagrams({ getLive: () => ({ columns, rows, meta, status }) });
+  m.initDiagrams({ getLive: () => ({ columns, rows, meta, status }), cfgVal });
 });
 connect();
 frame();

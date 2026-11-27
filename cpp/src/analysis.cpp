@@ -486,10 +486,12 @@ void analysis_steps(const Params& p, const Args& args, Json& j) {
     // theory of the ideal loops (a = a_des, continuous time)
     const auto& c = p.ctrl;
     j.key("theory"); j.obj();
-    j.kn("k_p", c.k_p); j.kn("k_i", c.k_i); j.kn("h", c.h); j.kn("lambda", c.lambda);
+    j.kn("k_p", c.k_p); j.kn("k_i", c.k_i); j.kn("k_d", c.k_d); j.kn("tau_f", c.tau_f());
+    j.kn("h", c.h); j.kn("lambda", c.lambda);
     j.kn("d0", c.d0); j.kb("fixed_spacing", c.fixed_spacing); j.kn("d_set", c.d_set);
-    j.kn("wn", std::sqrt(c.k_i));
-    j.kn("zeta", c.k_p / (2.0 * std::sqrt(c.k_i)));
+    // PID with D on the measured speed: (1 + k_d) s^2 + k_p s + k_i (filter neglected)
+    j.kn("wn", std::sqrt(c.k_i / (1.0 + c.k_d)));
+    j.kn("zeta", c.k_p / (2.0 * std::sqrt(c.k_i * (1.0 + c.k_d))));
     j.kn("zero", c.k_i / c.k_p);
     j.kn("tau_es", 1.0 / c.lambda);
     j.kn("Ts_ctrl", p.sim.Ts_ctrl);
@@ -617,7 +619,9 @@ void analysis_bode(const Params& p, const Args& args, Json& j) {
         for (double f : ff) {
             const cplx s(0.0, 2.0 * PI * f);
             cplx G(1.0, 0.0);
-            if (defs[l].loop == Loop::SPEED) G = (C.k_p * s + C.k_i) / (s * s + C.k_p * s + C.k_i);
+            if (defs[l].loop == Loop::SPEED)   // PID, D filtered and on the measurement
+                G = (C.k_p * s + C.k_i) /
+                    (s * s + C.k_p * s + C.k_i + C.k_d * s * s / (C.tau_f() * s + 1.0));
             if (defs[l].loop == Loop::FOLLOW)
                 G = (s + C.lambda) / (C.h * s * s + (1.0 + C.lambda * h_eff) * s + C.lambda);
             g.push_back(20.0 * std::log10(std::abs(G)));
@@ -630,7 +634,7 @@ void analysis_bode(const Params& p, const Args& args, Json& j) {
         j.end_obj();
     }
     j.key("model"); j.obj();
-    j.kn("k_p", C.k_p); j.kn("k_i", C.k_i); j.kn("h", C.h); j.kn("lambda", C.lambda);
+    j.kn("k_p", C.k_p); j.kn("k_i", C.k_i); j.kn("k_d", C.k_d); j.kn("h", C.h); j.kn("lambda", C.lambda);
     j.kb("fixed_spacing", C.fixed_spacing);
     j.kn("th_e", p.ice.th_e); j.kn("tau_m_v0", p.ice.tau_m(v0));
     j.kn("th_b", p.brk.th_b); j.kn("tau_b", p.brk.tau_b); j.kn("w_ci", p.ev.w_ci);
@@ -834,12 +838,13 @@ double metric(const RunMetrics& m, int i) {
     }
 }
 
-const char* SWEEP_PARAMS = "k_p, k_i, h, lambda, d0, d_set, d_det, a_min, a_max, v0, v_set, v_lead0, d_init, a_b";
+const char* SWEEP_PARAMS = "k_p, k_i, k_d, h, lambda, d0, d_set, d_det, a_min, a_max, v0, v_set, v_lead0, d_init, a_b";
 
 void apply_param(Params& q, const std::string& name, double x) {
     auto& c = q.ctrl; auto& s = q.scn;
     if      (name == "k_p")     c.k_p = x;
     else if (name == "k_i")     c.k_i = x;
+    else if (name == "k_d")     c.k_d = std::max(x, 0.0);
     else if (name == "h")       { c.h = x; c.fixed_spacing = false; }
     else if (name == "lambda")  c.lambda = x;
     else if (name == "d0")      { c.d0 = x; c.fixed_spacing = false; }
@@ -915,7 +920,7 @@ void analysis_sweep(const Params& p, const Args& args, Json& j) {
     }
     j.end_obj();
     j.key("config"); j.obj();
-    j.kn("k_p", p.ctrl.k_p); j.kn("k_i", p.ctrl.k_i); j.kn("h", p.ctrl.h);
+    j.kn("k_p", p.ctrl.k_p); j.kn("k_i", p.ctrl.k_i); j.kn("k_d", p.ctrl.k_d); j.kn("h", p.ctrl.h);
     j.kn("lambda", p.ctrl.lambda); j.kn("d0", p.ctrl.d0); j.kn("d_set", p.ctrl.d_set);
     j.kb("fixed_spacing", p.ctrl.fixed_spacing);
     j.kn("v0", base.scn.v0); j.kn("a_b", base.scn.lead_accel);

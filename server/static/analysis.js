@@ -20,6 +20,7 @@ const SWEEP_PARAMS = {
   d_set: { label: "fixed distance d_set [m]", range: [5, 80] },
   k_p: { label: "speed gain k_p [1/s]", range: [0.2, 2] },
   k_i: { label: "speed gain k_i [1/s²]", range: [0.02, 0.6] },
+  k_d: { label: "speed gain k_d (D) [–]", range: [0, 1.5] },
   lambda: { label: "distance gain λ [1/s]", range: [0.1, 1.5] },
   d0: { label: "standstill distance d0 [m]", range: [0, 15] },
   d_det: { label: "radar range d_det [m]", range: [30, 250] },
@@ -387,7 +388,7 @@ function renderSteps(r, host) {
   tiles(host, [
     ...cars.map((c) => ({ label: `${NAME[c]} overshoot`, value: num(mt(c).overshoot, 3), unit: "%",
       note: `settles in ${num(mt(c).t_settle, 3)} s`, tone: c === "ideal" ? "muted" : "" })),
-    { label: "Ideal loop", value: `ζ = ${num(th.zeta)}`, note: `ω_n = √k_i = ${num(th.wn)} rad/s` },
+    { label: "Ideal loop", value: `ζ = ${num(th.zeta)}`, note: `ω_n = √(k_i/(1+k_d)) = ${num(th.wn)} rad/s` },
     ...["ice", "ev"].map((c) => ({ label: `${NAME[c]} max |spacing error|`, value: num(fo[c].metrics.es_max), unit: "m",
       note: `ideal: ${num(fo.ideal.metrics.es_max)} m`, tone: fo[c].metrics.collided ? "bad" : "" })),
   ]);
@@ -428,11 +429,13 @@ function renderSteps(r, host) {
   const tsIdeal = 4 / (th.zeta * th.wn);
   const tooHard = abs(r.a_lead) > abs(th.a_min);
   why(host, "Why the loops behave like this", [
-    `<b>Speed loop = second order with a zero.</b> With a perfect actuator, v̇ = a = k_p·e + k_i·∫e, so the closed loop is
-     (k_p·s + k_i)/(s² + k_p·s + k_i). With k_p = ${th.k_p} and k_i = ${th.k_i}: ω_n = √k_i = ${num(th.wn)} rad/s and
-     ζ = k_p/(2√k_i) = ${num(th.zeta)}, which is well damped. The overshoot of ${num(mt("ideal").overshoot)} % comes from
-     the PI zero at k_i/k_p = ${num(th.zero)} rad/s, which sits below ω_n and makes the response overshoot even though ζ
-     is high. The settling time is about 4/(ζ·ω_n) = ${num(tsIdeal)} s.`,
+    `<b>Speed loop = second order with a zero (PID).</b> With a perfect actuator, v̇ = a = k_p·e + k_i·∫e − k_d·v̇: the
+     derivative acts on the measured speed (filtered, τ_f = ${num(th.tau_f)} s), so a set-speed step gives no kick, and it
+     behaves like an extra (1 + k_d) on the inertia. The closed loop is (k_p·s + k_i)/((1 + k_d)·s² + k_p·s + k_i). With
+     k_p = ${th.k_p}, k_i = ${th.k_i} and k_d = ${th.k_d}: ω_n = √(k_i/(1+k_d)) = ${num(th.wn)} rad/s and
+     ζ = k_p/(2√(k_i(1+k_d))) = ${num(th.zeta)}. The D term buys phase margin against the actuator delay; the overshoot of
+     ${num(mt("ideal").overshoot)} % still comes from the zero at k_i/k_p = ${num(th.zero)} rad/s, which sits below ω_n and
+     makes the response overshoot even though ζ is high. The settling time is about 4/(ζ·ω_n) = ${num(tsIdeal)} s.`,
     satIce || satEv
       ? `<b>Why the real cars overshoot less than the ideal plant.</b> The ideal plant delivers the full a_des
          (${num(sp.ideal.a_peak)} m/s² peak). The ICE only reaches ${num(sp.ice.a_peak)} m/s² and the EV
@@ -497,8 +500,8 @@ function renderBode(r, host) {
      ${r.v0} m/s) adds atan(2π·f·τ_m) and pulls the gain down: −3 dB at about ${num(band("plant", "ice"))} Hz. The EV
      stays near 0 dB and 0° over the whole range, because its current loop (ω_ci = ${m.w_ci} rad/s ≈
      ${num(m.w_ci / (2 * Math.PI))} Hz) is far above these frequencies.`,
-    `<b>Speed loop.</b> The theory curve is (k_p·s + k_i)/(s² + k_p·s + k_i). It has a small resonance peak
-     (${num(Math.max(...r.speed.ideal.gain_db))} dB) from the PI zero, the frequency-domain image of the step overshoot.
+    `<b>Speed loop.</b> The theory curve is (k_p·s + k_i)/(s² + k_p·s + k_i + k_d·s²/(τ_f·s + 1)) (PID, D on the measurement).
+     It has a small resonance peak (${num(Math.max(...r.speed.ideal.gain_db))} dB) from the zero k_i/k_p, the frequency-domain image of the step overshoot.
      The bandwidth is about ${num(band("speed", "ice"))} Hz, so set-speed changes slower than about
      ${num(1 / (band("speed", "ice") || 1), 2)} s are tracked and faster ones are smoothed. The real cars match the
      theory because the plant is about 50 times faster than this loop.`,

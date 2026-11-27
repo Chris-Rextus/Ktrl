@@ -110,6 +110,9 @@ struct EvParams {
 
 struct CtrlParams {
     double k_p, k_i, h, lambda, d0, d_det;   // sensors are ideal (no delay)
+    double k_d = 0.0;           // -   cruise PID: derivative gain on the measured speed (0 = PI)
+    double N_d = 10.0;          // -   derivative filter: tau_f = T_D / N_d, T_D = k_d / k_p
+    double tau_f() const { return (k_p > 0.0 && N_d > 0.0) ? k_d / k_p / N_d : 0.0; }
     bool   fixed_spacing;       // false: d_ref = d0 + h*v (time gap); true: d_ref = d_set
     double d_set;               // m   target distance when fixed_spacing
 

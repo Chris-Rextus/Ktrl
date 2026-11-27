@@ -106,6 +106,9 @@ Params Params::from_config(const Config& c) {
     // ---- controller / leader
     p.ctrl.k_p          = c.get_double("controller.k_p");
     p.ctrl.k_i          = c.get_double("controller.k_i");
+    p.ctrl.k_d          = c.get_double("controller.k_d", 0.0);     // PID (absent = PI)
+    p.ctrl.N_d          = c.get_double("controller.N_d", 10.0);
+    require(p.ctrl.k_d >= 0.0 && p.ctrl.N_d > 0.0, "controller.k_d >= 0 and N_d > 0");
     p.ctrl.h            = c.get_double("controller.h");
     p.ctrl.lambda       = c.get_double("controller.lambda");
     p.ctrl.d0           = c.get_double("controller.d0");
@@ -233,6 +236,8 @@ void print_params(const Params& p, std::ostream& os) {
        << "== steps\n"
        << "  ctrl: ICE " << d.n_ctrl_ice << ", EV " << d.n_ctrl_ev
        << " | th_e " << d.n_th_e << " | th_b ICE " << d.n_th_b_ice << ", EV " << d.n_th_b_ev << "\n"
+       << "== cruise PID: k_p=" << p.ctrl.k_p << "  k_i=" << p.ctrl.k_i << "  k_d=" << p.ctrl.k_d
+       << "  (T_D=" << (p.ctrl.k_p > 0 ? p.ctrl.k_d / p.ctrl.k_p : 0.0) << " s, tau_f=" << p.ctrl.tau_f() << " s)\n"
        << "== spacing: ";
     if (p.ctrl.fixed_spacing) os << "fixed, d_ref = " << p.ctrl.d_set << " m\n";
     else os << "time gap, d_ref = d0 + h*v = " << p.ctrl.d0 << " + " << p.ctrl.h << "*v\n";

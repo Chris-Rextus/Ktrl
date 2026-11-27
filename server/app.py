@@ -16,6 +16,7 @@ REST (JSON):
     POST /api/run/restart            running: bump restart_id; otherwise start
     POST /api/tests                  vehicle_sim --test-all
     POST /api/batch                  {"presets": ["S5", "S6"]} (empty = all)
+    POST /api/analysis               {"kind": "min_gap", "args": {"v0": 30}, "use_runtime": true}
     GET  /api/batch                  list of batch files + summary text
     GET  /api/batch/{file}           one batch file parsed {meta, columns, rows}
     GET  /api/output                 current run (same as the WebSocket snapshot)
@@ -56,7 +57,7 @@ RUNTIME_KEYS: dict[str, str] = {
     "v_set": "number|scenario", "leader_accel": "number|scenario",
     "h": "number", "lambda": "number", "d0": "number", "d_set": "number",
     "spacing": "choice:time_gap|fixed",
-    "k_p": "number", "k_i": "number", "beta": "number",
+    "k_p": "number", "k_i": "number", "k_d": "number", "beta": "number",
 }
 
 sim = SimManager()
@@ -111,41 +112,6 @@ def _check_runtime_value(key: str, value: Any) -> Any:
         choices = kind[len("choice:"):].split("|")
         if value not in choices:
             raise HTTPException(400, f"runtime.{key} must be one of {', '.join(choices)}")
-        return value
-    if kind.endswith("|scenario") and value == "scenario":
-        return value
-    try:
-        v = float(value)
-    except (TypeError, ValueError):
-        raise HTTPException(400, f"runtime.{key} must be a number"
-                                 + (" or 'scenario'" if "scenario" in kind else ""))
-    if not math.isfinite(v):
-        raise HTTPException(400, f"runtime.{key} must be finite")
-    return v
-    kind = RUNTIME_KEYS.get(key)
-    if kind is None:
-        raise HTTPException(400, f"'{key}' is not a runtime key "
-                                 f"(allowed: {', '.join(RUNTIME_KEYS)})")
-    if value is None:
-        return None                                    # remove the key
-    if kind == "bool":
-        if not isinstance(value, bool):
-            raise HTTPException(400, f"runtime.{key} must be true or false")
-        return value
-    if kind == "int":
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise HTTPException(400, f"runtime.{key} must be an integer")
-        return value
-        if kind == "int":
-            if isinstance(value, bool) or not isinstance(value, int):
-                raise HTTPException(400, f"runtime.{key} must be an integer")
-            return value
-    if kind.startswith("choice:"):
-        choices = kind[len("choice:"):].split("|")
-        if value not in choices:
-            raise HTTPException(400, f"runtime.{key} must be one of {', '.join(choices)}")
-        return value
-    if kind.endswith("|scenario") and value == "scenario":
         return value
     if kind.endswith("|scenario") and value == "scenario":
         return value
@@ -337,10 +303,11 @@ async def get_batch_file(name: str) -> dict[str, Any]:
         raise HTTPException(404, f"{name} not found - run a batch first")
     return parse_output_file(path)
 
+
 # ------------------------------------------------------------------ analysis
 ANALYSES = ("plant", "steps", "bode", "min_gap", "sweep")
 # [runtime] keys that map onto saved sections (live overrides)
-RUNTIME_TO_SECTION = {"k_p": "controller", "k_i": "controller", "h": "controller",
+RUNTIME_TO_SECTION = {"k_p": "controller", "k_i": "controller", "k_d": "controller", "h": "controller",
                       "lambda": "controller", "d0": "controller", "d_set": "controller",
                       "spacing": "controller", "beta": "environment"}
 

@@ -496,3 +496,100 @@ dialog::backdrop { background: rgba(0,0,0,.45); }
 .dg-svg { max-height: calc(100vh - 320px); }
 .dg-stage.fs .dg-svg { max-height: calc(100vh - 190px); }
 .dg-table th { text-transform: none; }
+
+/* ---- diagrams: signal roles, units and the opened plant (mesh tabs) */
+.dg-unit { font-family: ui-monospace, Menlo, monospace !important; font-size: 11.5px; fill: var(--muted); }
+.dg-unit.live { fill: var(--accent); font-weight: 700; }
+.dg-sig { font-family: "Cambria Math", "Times New Roman", serif !important; font-style: italic; font-size: 20px; fill: var(--text); }
+.dg-eqs { font-family: "Cambria Math", "STIX Two Math", "Times New Roman", serif !important; font-style: italic; font-size: 16px; fill: var(--text); }
+.dg-subtitle { font-size: 12px; font-weight: 800; letter-spacing: .08em; fill: var(--muted); }
+.dg-block.sub rect { stroke-width: 2; }
+.dg-block.sub.on .dg-subtitle { fill: var(--accent); }
+.dg-block.dg-click { cursor: pointer; }
+.dg-block.dg-click:hover rect { stroke: var(--accent); }
+.dg-block.dg-click.open rect { stroke: var(--accent); stroke-dasharray: 10 6; }
+.dg-hint, .dg-close { cursor: pointer; }
+.dg-hint rect { fill: var(--accent-a); stroke: var(--accent); stroke-width: 1.4; transition: fill .2s; }
+.dg-close rect { fill: var(--panel); stroke: var(--accent); stroke-width: 1.4; transition: fill .2s; }
+.dg-hint:hover rect, .dg-close:hover rect { fill: color-mix(in srgb, var(--accent) 28%, var(--panel)); }
+.dg-hint text, .dg-close text { font-size: 13px; font-weight: 700; fill: var(--accent); }
+.dg-callout { fill: var(--accent); fill-opacity: .05; stroke: var(--accent); stroke-opacity: .5; stroke-width: 1.5; stroke-dasharray: 7 6; }
+.dg-region.dg-detail rect { fill: color-mix(in srgb, var(--accent) 5%, var(--panel)); stroke: var(--accent); stroke-dasharray: none; }
+.dg-region.dg-detail .dg-region-title { fill: var(--accent); letter-spacing: .05em; }
+.dg-role rect { fill: var(--panel); stroke: var(--accent); stroke-width: 1.3; }
+.dg-role text { font-size: 11.5px; font-weight: 800; letter-spacing: .07em; fill: var(--accent); }
+.dg-role.cv rect { stroke: var(--ok); fill: color-mix(in srgb, var(--ok) 14%, var(--panel)); }
+.dg-role.cv text { fill: var(--ok); }
+.dg-role.mv rect { stroke: var(--warn); fill: color-mix(in srgb, var(--warn) 14%, var(--panel)); }
+.dg-role.mv text { fill: var(--warn); }
+.dg-role.ref rect { stroke: var(--target); fill: color-mix(in srgb, var(--target) 14%, var(--panel)); }
+.dg-role.ref text { fill: var(--target); }
+.dg-role.dist rect { stroke: var(--muted); }
+.dg-role.dist text { fill: var(--muted); }
+.dg-svg.tall { max-height: none; }
+.dg-vars { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.dg-var { background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--border-2); border-radius: 9px; padding: 6px 12px; }
+.dg-var span { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 700; }
+.dg-var b { font-family: "Cambria Math", "Times New Roman", serif; font-size: 16px; font-weight: 600; }
+.dg-var.cv { border-left-color: var(--ok); }
+.dg-var.mv { border-left-color: var(--warn); }
+.dg-var.ref { border-left-color: var(--target); }
+.dg-var.err { border-left-color: var(--accent); }
+.dg-var.dist { border-left-color: var(--muted); }
+.dg-iotab { margin: 0 0 10px; }
+.dg-iotab summary { cursor: pointer; font-weight: 700; font-size: 14px; color: var(--text-2); padding: 6px 2px; }
+.dg-table.io th, .dg-table.io td { text-align: left; white-space: normal; }
+.dg-table.io td { font-family: "Cambria Math", "Times New Roman", serif; font-size: 15px; }
+.dg-table.io td:first-child { font-family: inherit; font-weight: 600; white-space: nowrap; }
+.dg-table.io tr.plant td { background: var(--accent-a); }
+.dg-table.io tr.grp td { color: var(--accent); font-family: inherit; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; background: var(--panel-2); }
+.dg-table.io tr.sub td:first-child { padding-left: 26px; color: var(--text-2); }
+
+/* ---- diagrams: transfer-function tab */
+.tf-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 12px; }
+.tf-pick .lbl { font-size: 12px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-right: 4px; }
+.tf-pick button { padding: 5px 12px; font-size: 13px; background: var(--panel); }
+.tf-pick button.on { border-color: var(--accent); background: var(--accent-a); color: var(--text); }
+.tf-pick em { font-style: normal; color: var(--text-2); font-size: 13px; margin-left: 8px; }
+.tf-row { display: grid; grid-template-columns: minmax(0, 1fr) 540px; gap: 16px; background: var(--panel); border: 1px solid var(--border);
+          border-radius: 14px; padding: 14px 16px; margin-bottom: 12px; }
+.tf-row.tf-samp { grid-template-columns: 1fr; }
+.tf-row h3 { margin: 0 0 8px; font-size: 17px; display: flex; align-items: center; gap: 10px; }
+.tf-n { display: inline-grid; place-items: center; min-width: 26px; height: 26px; padding: 0 7px; border-radius: 13px; background: var(--accent-2); color: #fff; font-size: 13px; }
+.tf-eq { display: grid; grid-template-columns: 118px minmax(0, 1fr); align-items: center; gap: 10px; padding: 4px 0; border-bottom: 1px dashed var(--border); }
+.tf-eq .k { font-size: 11px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.tf-eq .v { font-family: "Cambria Math", "Times New Roman", serif; font-size: 18px; line-height: 2.1; overflow-x: auto; white-space: nowrap; }
+.tf-core { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 6px; margin-top: 10px; }
+.tf-core > div { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
+.tf-core span { display: block; font-size: 11px; color: var(--muted); font-weight: 700; letter-spacing: .03em; }
+.tf-core b { font-family: ui-monospace, Menlo, monospace; font-size: 13.5px; font-weight: 600; }
+.tf-core .ok { border-color: var(--ok); }
+.tf-core .ok b { color: var(--ok); }
+.tf-core .bad { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, var(--panel-2)); }
+.tf-core .bad b { color: var(--bad); }
+.tf-core .hl { border-color: var(--accent); background: var(--accent-a); }
+.tf-note { color: var(--text-2); font-size: 13.5px; margin: 8px 2px 0; }
+.tf-zp { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.zp { width: 100%; height: auto; display: block; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; }
+.zp-bg { fill: none; }
+.zp-grid { stroke: var(--grid); stroke-width: 1; }
+.zp-axis { stroke: var(--border-2); stroke-width: 1.2; }
+.zp-unit { fill: none; stroke: var(--text-2); stroke-width: 1.6; stroke-dasharray: 5 4; }
+.zp-tick { font-size: 10px; fill: var(--muted); font-family: ui-monospace, Menlo, monospace; }
+.zp-cap { font-size: 11px; font-weight: 800; fill: var(--muted); letter-spacing: .05em; }
+.zp-ax { font-size: 10.5px; fill: var(--muted); font-style: italic; }
+.zm { cursor: help; }
+.zm path { stroke: var(--zc); stroke-width: 2.6; stroke-linecap: round; }
+.zm circle { fill: none; stroke: var(--zc); stroke-width: 2.2; }
+.zm text { font-size: 11px; font-weight: 800; fill: var(--zc); }
+.zm.ghost path { stroke: var(--muted); stroke-width: 1.6; opacity: .75; }
+.zm.ghost text { fill: var(--muted); }
+.zm.bad path { stroke: var(--bad); }
+.zm.bad text { fill: var(--bad); }
+.zm.off text { font-family: ui-monospace, Menlo, monospace; }
+.tf-legend { font-size: 12px; color: var(--muted); margin-top: 6px; }
+.tf-legend span { font-weight: 800; margin: 0 2px 0 8px; }
+.tf-legend .p, .tf-legend .z { color: var(--zc); }
+.tf-legend .g { color: var(--muted); }
+.tf-legend .b { color: var(--bad); }
+@media (max-width: 1250px) { .tf-row { grid-template-columns: 1fr; } .tf-zp { max-width: 640px; } }

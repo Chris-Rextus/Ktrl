@@ -51,7 +51,6 @@ bool Runner::finished() const {
     return p_.sim.duration > 0.0 && sim_t() >= p_.sim.duration - 1e-9;
 }
 
-
 bool Runner::all_stopped() const {
     return (ice_ || ev_) && (!ice_ || ice_->frozen()) && (!ev_ || ev_->frozen());
 }
@@ -334,13 +333,14 @@ void Runner::apply_runtime(const Config& c, bool first) {
     }
 
     // controller gains (live)
-    for (const char* k : {"k_p", "k_i", "h", "lambda", "d0", "d_set"}) {
+    for (const char* k : {"k_p", "k_i", "k_d", "h", "lambda", "d0", "d_set"}) {
         if (!changed(k)) continue;
         const double val = c.get_double(std::string("runtime.") + k);
         for_lanes([&](auto& L) {
             auto& g = L.ctrl().gains();
             if      (std::string(k) == "k_p")    g.k_p = val;
             else if (std::string(k) == "k_i")    g.k_i = val;
+            else if (std::string(k) == "k_d")    g.k_d = std::max(val, 0.0);
             else if (std::string(k) == "h")      g.h = std::max(val, 0.05);
             else if (std::string(k) == "lambda") g.lambda = val;
             else if (std::string(k) == "d0")     g.d0 = val;

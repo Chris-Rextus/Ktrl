@@ -14,10 +14,18 @@ const UpperController::Outputs& UpperController::update(const Inputs& in) {
         o.a_sv  = ((in.v_lead - in.v) + c_.lambda * o.e_s) / c_.h;
     }
 
-    // (a) cruise PI, backward Euler: I[k] = I[k-1] + k_i*Ts*e_v[k]
+    // (a) cruise PID, backward Euler: I[k] = I[k-1] + k_i*Ts*e_v[k]
+    //     D[k] = (tau_f*D[k-1] - k_d*(v[k] - v[k-1])) / (tau_f + Ts)   (on the measurement)
     const double I_try = I_ + c_.k_i * Ts_ * o.e_v;
+    if (c_.k_d > 0.0 && has_v_) {
+        const double tf = c_.tau_f();
+        D_ = (tf * D_ - c_.k_d * (in.v - v_prev_)) / (tf + Ts_);
+    } else {
+        D_ = 0.0;
+    }
+    v_prev_ = in.v; has_v_ = true;
     auto select = [&](double I) {
-        o.a_cr = c_.k_p * o.e_v + I;
+        o.a_cr = c_.k_p * o.e_v + I + D_;
         o.mode = (follow_possible && o.a_sv < o.a_cr) ? FOLLOW : CRUISE;
         const double a_brut = o.mode == FOLLOW ? o.a_sv : o.a_cr;
         o.a_des = sat(a_brut);
@@ -45,11 +53,12 @@ const UpperController::Outputs& UpperController::update(const Inputs& in) {
         // bumpless transfer needs I = a_des - 7.5, which that bound would clip,
         // giving a jump of up to 2.5 m/s2 at the switch (criterion C5).
         constexpr double I_LIM = 50.0;   // safety bound only
-        const double I_track = o.a_des - c_.k_p * o.e_v;
+        const double I_track = o.a_des - c_.k_p * o.e_v - D_;
         I_ = I_track < -I_LIM ? -I_LIM : (I_track > I_LIM ? I_LIM : I_track);
     }
 
     o.I = I_;
+    o.D = D_;
     out_ = o;
     return out_;
 }

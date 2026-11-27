@@ -274,15 +274,20 @@ int test_loop(const Params& p, std::ostream& os) {
     // ---------------------------------------------- T0: linearity (§12.6, C1)
     os << "-- T0 cruise step v_set +0.5 m/s at t = 5 s, ideal sensors (§12.6, C1 +/-10 %)\n";
     {
+        // references: PI (k_d = 0) from the document; PID (k_d = 0.375, N_d = 10)
+        // from the independent discrete model that sized the D term (it gives
+        // the document's PI values back exactly with k_d = 0)
+        const bool pid = p.ctrl.k_d > 0.0;
+        os << "   cruise controller: " << (pid ? "PID" : "PI") << ", k_d = " << p.ctrl.k_d << "\n";
         double v_end = 0.0;
         const double D_ev = overshoot_pct<EvVehicle>(p, 30.0, 0.5, 40.0, v_end);
-        ck("EV  v0=30 overshoot [%]", D_ev, 16.4, 0.10);
+        ck("EV  v0=30 overshoot [%]", D_ev, pid ? 19.6 : 16.4, 0.10);
         ck("EV  v0=30 v(40 s) [m/s]", v_end, 30.5, 0, 0.01);
-        struct Ref { double v0, D; };
-        for (const Ref& r : {Ref{10, 19.2}, Ref{20, 18.0}, Ref{30, 17.6}, Ref{40, 17.4}}) {
+        struct Ref { double v0, D, D_pid; };
+        for (const Ref& r : {Ref{10, 19.2, 21.5}, Ref{20, 18.0, 20.7}, Ref{30, 17.6, 20.5}, Ref{40, 17.4, 20.4}}) {
             const double D = overshoot_pct<IceVehicle>(p, r.v0, 0.5, 40.0, v_end);
             const std::string tag = "ICE v0=" + std::to_string(int(r.v0)) + " ";
-            ck(tag + "overshoot [%]", D, r.D, 0.10);
+            ck(tag + "overshoot [%]", D, pid ? r.D_pid : r.D, 0.10);
             ck(tag + "v(40 s) [m/s]", v_end, r.v0 + 0.5, 0, 0.01);
         }
     }
